@@ -14,7 +14,7 @@ function imgModal() {
     img.onclick = function(){
         // Disable main scroll bar
         document.body.style.overflow = "hidden";
-
+        alert("show img");
         // Show modal
         modal.style.display = "block";
 

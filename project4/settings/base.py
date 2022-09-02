@@ -31,8 +31,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 
 INSTALLED_APPS = [
     'network.apps.NetworkConfig',
-    'django_countries',
-    'flatpickr',
+    'django_countries',#contries select form
+    'flatpickr',#for date pickerup form
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -107,11 +107,13 @@ FLATPICKR_SETTINGS = {
 
 LANGUAGES = [
     ('en', 'English'),
-    ('pl', 'Polish')
+    ('pl', 'Polish'),
+    ('vi', 'Vietnamese'),
 ]
 
-LANGUAGE_CODE = 'en-us'
+# LANGUAGE_CODE = 'en-us'
 # LANGUAGE_CODE = 'pl'
+LANGUAGE_CODE = 'vi'
 
 TIME_ZONE = 'UTC'
 
