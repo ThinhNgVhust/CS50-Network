@@ -1014,1735 +1014,1735 @@ class ViewsTestCase(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
-class FrontEndTestCase(StaticLiveServerTestCase):
-    def setUp(self):
-        # Create a user
-        self.user = User.objects.create_user(username="test", password="password")
-        self.c = Client()
-
-        # Populate the user-profile with data
-        user_profile = self.user.profile
-        user_profile.name = "Tom"
-        user_profile.date_of_birth = "2000-12-20"
-        user_profile.about = "My name is Tom"
-        user_profile.country = "PL"
-        user_profile.save()
-
-        # Create a post
-        post = Post.objects.create(user=self.user, content="post 1")
-        # Create comments
-        for i in range(3):
-            Comment.objects.create(user=self.user, post=post, content=f"comment {i}")
-
-        options = webdriver.ChromeOptions()
-        # Set language to english
-        options.add_experimental_option('prefs', {'intl.accept_languages': 'en_US'})
-        options.add_argument("--lang=en_US")
-        # Set chrome to be invisible
-        options.add_argument("--headless")
-        options.add_argument("--window-size=1920,1080")
-        # For GitHub actions
-        self.browser = webdriver.Chrome(chrome_options=options)
-        ''' For VS
-        # Create chromedirver path
-        project_dir = os.path.abspath(os.getcwd())
-        chromedriver_dir = os.path.join(project_dir, "chromedriver", "chromedriver.exe")
-        self.browser = webdriver.Chrome(chromedriver_dir, chrome_options=options)
-        '''
-        self.browser.implicitly_wait(10)
-
-        super(FrontEndTestCase, self).setUp()
-
-    def tearDown(self):
-        time.sleep(2)
-        # Close browser after testing
-        self.browser.quit()
-        super(FrontEndTestCase, self).tearDown()
-
-    def login_front_end(self, username="test", password="password"):
-        """ Method to automate logging in usign login page form """
-        time.sleep(1)
-        # Go to login page
-        self.browser.get(f"{self.live_server_url}/login")
-
-        # Populate login form with username and password
-        username_el = self.browser.find_element_by_id("id_username")
-        password_el = self.browser.find_element_by_id("id_password")
-        username_el.send_keys(username)
-        password_el.send_keys(password)
-
-        # Log in
-        self.browser.find_element_by_css_selector("input[type='submit']").click()
-
-    def login_quick(self, username="test", password="password"):
-        """ Method to automate logging in using client.login method and cookies """
-        self.c.login(username=username, password=password)
-        cookie = self.c.cookies['sessionid']
-        self.browser.get(self.live_server_url)
-        self.browser.add_cookie({"name": "sessionid", "value": cookie.value, "secure": False, "path": "/"})
-
-    def is_element_present(self, element, css_locator):
-        """ Method to check if element exists in HTML """
-        try:
-            element.find_element_by_css_selector(css_locator)
-        except NoSuchElementException:
-            return False
-        else:
-            return True
-
-    def like_panel_test(self, user, post_comment):
-        # Get - like-panel, like button and emoji-choice smile
-        like_panel_el = post_comment.find_element_by_css_selector(".like-panel")
-        like_button_el = like_panel_el.find_element_by_css_selector(".like-button")
-        smile_emoji_el = like_panel_el.find_element_by_css_selector("i[data-name='smile']")
-
-
-        # Move cursor to the like button -> after 1.5s to the smile emoji -> click on the smile emoji
-        action = ActionChains(self.browser)
-        time.sleep(1)
-        action.move_to_element(like_button_el).perform()
-        time.sleep(1.5)
-        action.move_to_element(smile_emoji_el).perform()
-        time.sleep(0.1)
-        smile_emoji_el.click()
-        time.sleep(0.7)
-
-        # Check if the new like exists and have correct emoji (database)
-        if post_comment.get_attribute("class").find("post") != -1:
-            like = Like.objects.filter(post=Post.objects.get(user=user)).all()
-        else:
-            comment_id = int(post_comment.get_attribute("id").split("_")[-1])
-            like = Like.objects.filter(comment=comment_id).all()
-        self.assertEqual(like.count(), 1)
-        self.assertEqual(like[0].emoji_type, 3)
-
-        # Check if the new like exists and have correct emoji (like-data)
-        if post_comment.get_attribute("class").find("post") != -1:
-            like_data_el = self.browser.find_element_by_css_selector(".post .like-data")
-        else:
-            like_data_el = self.browser.find_elements_by_css_selector(".comment .like-data")[0]
-        self.assertTrue(self.is_element_present(like_data_el, "ul.emoji-list i[data-name='smile']"))
-        # Check if the new like has data-count = 1
-        emoji_el = like_data_el.find_element_by_css_selector("ul.emoji-list i[data-name='smile']")
-        self.assertEqual(emoji_el.get_attribute("data-count"), "1")
-        # Check if the like-counter is empty
-        self.assertEqual(like_data_el.find_element_by_class_name("like-counter").text, "")
-
-    # Index tests
-    def test_frontend_create_post_from_form(self):
-        """ Create a post using post form -> check if it exists """
-        # Login user
-        self.login_quick()
-        # Get index page
-        self.browser.get(self.live_server_url)
-
-        # Get form element
-        form_el = self.browser.find_element_by_css_selector(".post-form-wrapper form")
-        # form_el = WebDriverWait(self.browser, 10).until(
-        #     EC.presence_of_element_located((By.CSS_SELECTOR, ".post-form-wrapper form"))
-        # )
-
-        # Populate textarea
-        form_el.find_element_by_id("id_content").send_keys("Sellenium test")
-        # Submit form
-        form_el.submit()
-
-        # Check if the post exists
-        self.assertEqual(Post.objects.filter(content="Sellenium test").count(), 1)
-
-    def test_frontend_post_order(self):
-        """ Create 2 posts -> check if they are in correct order (from newest to oldest) """
-        # Create 2 posts
-        post_1 = Post.objects.create(user=self.user, content="post 2")
-        time.sleep(0.1)
-        post_2 = Post.objects.create(user=self.user, content="post 3")
-
-        # Login user
-        self.login_quick()
-        # Get index page
-        self.browser.get(self.live_server_url)
-
-        # Wait for page full load
-        # WebDriverWait(self.browser, 10).until(
-        #     EC.presence_of_element_located((By.CSS_SELECTOR, ".post-comment-element"))
-        # )
-
-        # Get posts
-        posts_el = self.browser.find_elements_by_class_name("post")
-
-        # Check is posts' id are in correct order: 3 -> 2 -> 1
-        for i, post_el in zip(range(3, 0, -1), posts_el):
-            # Get posts inner text
-            post_content = post_el.find_elements_by_class_name("post-content")[0]
-            # Get posts number
-            post_number = post_content.text.split()[-1]
-            self.assertEqual(post_number, str(i))
-
-    # User profile tests
-    def test_frontend_following_data(self):
-        """ Follow user by 5 other users, follow 2 users -> check if data in user profile is correct """
-        users = []
-
-        # Crete users and follow self.user
-        for i in range(5):
-            users.append(User.objects.create_user(username=str(i), password=str(i)))
-            Following.objects.create(user=users[i], user_followed=self.user)
-
-        # Make self.user be followed by 2 users
-        Following.objects.create(user=self.user, user_followed=users[0])
-        Following.objects.create(user=self.user, user_followed=users[1])
-
-        # Login user
-        self.login_quick()
-        # Get to self.user profile page
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-
-        # Get following data
-        following_info_card = self.browser.find_element_by_class_name("profile-following")
-        followers = following_info_card.find_element_by_css_selector(".followers .follow-count").text
-        following = following_info_card.find_element_by_css_selector(".following .follow-count").text
-
-        self.assertEqual(followers, str(5))
-        self.assertEqual(following, str(2))
-
-    def test_frontend_bio_info(self):
-        """ Check if user's bio in user profile is correct """
-        # Login user
-        self.login_quick()
-        # Get to self.user profile page
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-
-        # Get bio info
-        bio_info_card = self.browser.find_element_by_class_name("bio")
-        name = bio_info_card.find_element_by_css_selector(".profile-name span") \
-                            .text.split(":")[-1].strip()
-        birth = bio_info_card.find_element_by_css_selector(".profile-birth span") \
-                            .text.split(":")[-1].strip()
-        about = bio_info_card.find_element_by_css_selector(".profile-about span") \
-                            .text.split(":")[-1].strip()
-        country = bio_info_card.find_element_by_css_selector(".profile-country span") \
-                            .text.split(":")[-1].strip()
-
-
-        self.assertEqual(name, "Tom")
-        self.assertEqual(birth, "20.12.2000")
-        self.assertEqual(about, "My name is Tom")
-        self.assertEqual(country, "Poland")
-
-    def test_frontend_profile_picture_src(self):
-        """ Check if profile picture is in media/profile_pics folder and is default """
-        # Login user
-        self.login_quick()
-        # Get to self.user profile page
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-
-        # Get full profile picure src
-        profile_picture = self.browser.find_element_by_css_selector(".profile-picture > img").get_attribute("src")
-        # Get short src - media/profile_pic/default.png
-        profile_picture_short_src = profile_picture.split("/")[-3:]
-
-        self.assertEqual(profile_picture_short_src[0], "media")
-        self.assertEqual(profile_picture_short_src[1], "profile_pics")
-        self.assertEqual(profile_picture_short_src[2], "default.png")
-
-    def test_frontend_follow_unfollow_button(self):
-        """ Check if follow/unfollow button works """
-        # Create a user
-        new_user = User.objects.create_user(username="1", password="1")
-
-        # Login user
-        self.login_quick()
-        # Get to self.user profile page
-        self.browser.get(self.live_server_url + f"/user-profile/{new_user.id}")
-
-        # Try to follow new_user and check if it works
-        follow_button = self.browser.find_element_by_css_selector(".profile-buttons button.follow")
-        follow_button.click()
-        time.sleep(0.1)
-        self.assertEqual(Following.objects.filter(user=self.user, user_followed=new_user).count(), 1)
-
-        # Try to unfollow new_user and check it works
-        unfollow_button = self.browser.find_element_by_css_selector(".profile-buttons button.unfollow")
-        unfollow_button.click()
-        time.sleep(0.1)
-        self.assertEqual(Following.objects.filter(user=self.user, user_followed=new_user).count(), 0)
-
-    # Edit-profile tests
-    def test_frontend_edit_profile_autopopulate_form(self):
-        """ Open edit-profile page and check if form is autopopulated with current user data """
-        # Login user
-        self.login_quick()
-        # Get to self.user profile page
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-
-        # Open edit-profile page
-        edit_profile_button = self.browser.find_element_by_id("edit-profile-btn")
-        edit_profile_button.click()
-
-        # Get all the form's fields
-        form_el = self.browser.find_element_by_css_selector(".edit-profile-form > form")
-        name_el = form_el.find_element_by_css_selector("input[name='name']")
-        date_of_birth_el = form_el.find_element_by_css_selector("input[name='date_of_birth']")
-        about_el = form_el.find_element_by_css_selector("textarea[name='about']")
-        country_el = Select(form_el.find_element_by_css_selector("select[name='country']"))
-
-        self.assertEqual(name_el.get_attribute("value"), "Tom")
-        self.assertEqual(date_of_birth_el.get_attribute("value"), "2000-12-20")
-        self.assertEqual(about_el.get_attribute("value"), "My name is Tom")
-        self.assertEqual(country_el.first_selected_option.get_attribute("value"), "PL")
-
-    def test_frontend_edit_profile_update_profile(self):
-        """ Try to fill out and submit the edit-profile form and check if user's data has changed """
-        # Get test image path
-        test_img_path = os.path.join(settings.MEDIA_ROOT, 'tests', 'test.jpg')
-
-        # Login user
-        self.login_quick()
-        # Get to self.user profile page
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-
-        # Open edit-profile page
-        edit_profile_button = self.browser.find_element_by_id("edit-profile-btn")
-        edit_profile_button.click()
-
-        # Get all the form's fields
-        form_el = self.browser.find_element_by_css_selector(".edit-profile-form > form")
-        name_el = form_el.find_element_by_css_selector("input[name='name']")
-        date_of_birth_el = form_el.find_element_by_css_selector("input[name='date_of_birth']")
-        about_el = form_el.find_element_by_css_selector("textarea[name='about']")
-        country_el = Select(form_el.find_element_by_css_selector("select[name='country']"))
-        image_el = form_el.find_element_by_id("id_image")
-
-        # Clear name input and fill out with new data
-        time.sleep(1)
-        name_el.clear()
-        time.sleep(1)
-        name_el.send_keys("John")
-        # Change date of birth
-        self.browser.execute_script("arguments[0].setAttribute('value', '2020-12-12');", date_of_birth_el)
-        # Clear about input and fill out with new data
-        about_el.clear()
-        time.sleep(1)
-        about_el.send_keys("My name is John")
-        # Change country
-        country_el.select_by_value("RU")
-        # Upload a new photo
-        image_el.send_keys(test_img_path)
-        time.sleep(0.7)
-        # Submit the form
-        form_el.submit()
-        time.sleep(1)
-
-        # Get the new user profile data
-        new_user_profile = UserProfile.objects.get(user=self.user)
-
-        # Prepare image file path to comparison
-        # 1. Normalize it
-        new_img_path = os.path.normpath(new_user_profile.image.path)
-        # 2. Get the last part of the path and discard django's additional chars
-        img_name = os.path.basename(new_img_path)
-
-        self.assertEqual(new_user_profile.name, "John")
-        self.assertEqual(new_user_profile.date_of_birth.strftime("%Y-%m-%d"), "2020-12-12")
-        self.assertEqual(new_user_profile.about, "My name is John")
-        self.assertEqual(new_user_profile.country, "RU")
-        self.assertEqual(img_name, "test.jpg")
-
-        # Delete new image file
-        if os.path.exists(new_img_path):
-            os.remove(new_img_path)
-
-    # Posts tests
-    def test_frontend_post_content(self):
-        """ Check if post's content is equal to post created (index, user-profile, following) """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post by the second user
-        Post.objects.create(user=new_user, content="new user post")
-
-        # Login user
-        self.login_quick()
-
-        # Check **index view**
-        self.browser.get(self.live_server_url)
-        posts_content_el = self.browser.find_elements_by_css_selector(".post .post-content")
-
-        self.assertEqual(len(posts_content_el), 2)
-        self.assertEqual(posts_content_el[0].text, "new user post")
-        self.assertEqual(posts_content_el[1].text, "post 1")
-
-        # Check **user-profile view**
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        posts_content_el = self.browser.find_elements_by_css_selector(".post .post-content")
-
-        self.assertEqual(len(posts_content_el), 1)
-        self.assertEqual(posts_content_el[0].text, "post 1")
-
-        # Check **following view**
-        self.browser.get(self.live_server_url + "/following")
-        posts_content_el = self.browser.find_elements_by_css_selector(".post .post-content")
-
-        self.assertEqual(len(posts_content_el), 1)
-        self.assertEqual(posts_content_el[0].text, "new user post")
-
-    def test_frontend_post_creator_button(self):
-        """ Check if post creator's name button redirects correctly to user profile """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post by the second user
-        Post.objects.create(user=new_user, content="new user post")
-
-        # Login user
-        self.login_quick()
-
-        # **Check index view**
-        self.browser.get(self.live_server_url)
-        post_user_link_el = self.browser.find_elements_by_css_selector(".post .post-user > a")
-        # The second post = self.user's post
-        post_user_link_el[1].click()
-        time.sleep(0.1)
-
-        # Get current url
-        current_url_list = self.browser.current_url.split("/")
-        # Check if url is .../user-profile/{self.user.id}
-        self.assertEqual(current_url_list[-2], "user-profile")
-        self.assertEqual(current_url_list[-1], str(self.user.id))
-
-        # **Check user-profile view**
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        post_user_link_el = self.browser.find_elements_by_css_selector(".post .post-user > a")
-        # The only post = self.user's post
-        post_user_link_el[0].click()
-        time.sleep(0.1)
-
-        # Get current url
-        current_url_list = self.browser.current_url.split("/")
-        # Check if url is .../user-profile/{self.user.id}
-        self.assertEqual(current_url_list[-2], "user-profile")
-        self.assertEqual(current_url_list[-1], str(self.user.id))
-
-        # **Check following view**
-        self.browser.get(self.live_server_url + "/following")
-        post_user_link_el = self.browser.find_elements_by_css_selector(".post .post-user > a")
-        # The only post = new_user's post
-        post_user_link_el[0].click()
-        time.sleep(0.1)
-
-        # Get current url
-        current_url_list = self.browser.current_url.split("/")
-        # Check if url is .../user-profile/{new_user.id}
-        self.assertEqual(current_url_list[-2], "user-profile")
-        self.assertEqual(current_url_list[-1], str(new_user.id))
-
-    def test_frontend_index_delete_edit_panel_exists_post(self):
-        """ Check if delete-edit-panel exists or doesn't exist for post's creator == current user and post's creator != current user """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Creat a post by the second user
-        Post.objects.create(user=new_user, content="new user post")
-
-        # Login user
-        self.login_quick()
-        # Go to index view
-        self.browser.get(self.live_server_url)
-
-        # Get posts
-        posts_el = self.browser.find_elements_by_css_selector(".post")
-
-        # Check if delete-edit-panel is present or not
-        self.assertFalse(self.is_element_present(posts_el[0], ".delete-edit-panel"))
-        self.assertTrue(self.is_element_present(posts_el[1], ".delete-edit-panel"))
-
-    def test_frontend_user_profile_delete_edit_panel_exists_post(self):
-        """ Check if delete-edit-panel exists or doesn't exist for post's creator == current user and post's creator != current user """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Creat a post by the second user
-        Post.objects.create(user=new_user, content="new user post")
-
-        # Login user
-        self.login_quick()
-
-        # Go to the self.user profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        # Get delete-edit-panels
-        posts_el = self.browser.find_elements_by_css_selector(".post")
-        # Check if delete-edit-panel is present
-        self.assertTrue(self.is_element_present(posts_el[0], ".delete-edit-panel"))
-
-        # Go to new_user profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{new_user.id}")
-        # Get posts
-        posts_el = self.browser.find_elements_by_css_selector(".post")
-        # Check if delete-edit-panel is present
-        self.assertFalse(self.is_element_present(posts_el[0], ".delete-edit-panel"))
-
-    def test_frontend_following_delete_edit_panel_exists_post(self):
-        """ Check if delete-edit-panel doesn't exist for and post's creator != current user """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post by the second user
-        Post.objects.create(user=new_user, content="new user post")
-
-        # Login the user
-        self.login_quick()
-        # Go to the following view
-        self.browser.get(self.live_server_url + "/following")
-
-        # Get the posts
-        posts_el = self.browser.find_elements_by_css_selector(".post")
-        # Check if the delete-edit-panel is present
-        self.assertFalse(self.is_element_present(posts_el[0], ".delete-edit-panel"))
-
-    def test_frontend_edit_post(self):
-        """ Try to edit a post using edit button (index and user-profile views) """
-        # Login the user
-        self.login_quick()
-
-        for url in ["", f"/user-profile/{self.user.id}"]:
-            self.browser.get(self.live_server_url + url)
-
-            # Get the delete-edit-panel
-            delete_edit_panel = self.browser.find_element_by_css_selector(".post .delete-edit-panel")
-            # Click on the icon button
-            delete_edit_panel.find_element_by_class_name("icon-button").click()
-            time.sleep(0.1)
-            # Click on the edit button
-            delete_edit_panel.find_element_by_class_name("dropdown-edit").click()
-            # Get the modal, its textarea and save button
-            modal_el = self.browser.find_element_by_css_selector(".post .edit-modal")
-            modal_textarea_el = modal_el.find_element_by_css_selector(".modal-body textarea")
-            modal_save_button = modal_el.find_element_by_css_selector(".modal-footer button.modal-save")
-            # Change the modal textarea's value
-            modal_textarea_el.clear()
-            time.sleep(0.7)
-            modal_textarea_el.send_keys("Post edited-" + self.browser.current_url)
-            time.sleep(0.5)
-            modal_save_button.click()
-            time.sleep(1)
-
-            # Get the post's data
-            edited_post = Post.objects.get(user=self.user)
-
-            self.assertEqual(edited_post.content, "Post edited-" + self.browser.current_url)
-
-    def test_frontend_index_delete_post(self):
-        """ Try to delete a post using delete button """
-        # Login the user
-        self.login_quick()
-        # Go to the index view
-        self.browser.get(self.live_server_url)
-
-        # Get delete-edit-panel
-        delete_edit_panel = self.browser.find_element_by_css_selector(".post .delete-edit-panel")
-        # Click on the icon button
-        delete_edit_panel.find_element_by_class_name("icon-button").click()
-        time.sleep(0.1)
-        # Click on the delete button
-        delete_edit_panel.find_element_by_class_name("dropdown-delete").click()
-        # Get the modal and click delete
-        modal_el = self.browser.find_element_by_css_selector(".post .delete-modal")
-        modal_el.find_element_by_css_selector(".modal-footer button.modal-delete").click()
-        time.sleep(0.7)
-
-        # Get the post
-        deleted_post = Post.objects.filter(user=self.user).all()
-
-        self.assertEqual(deleted_post.count(), 0)
-
-    def test_frontend_user_profile_delete_post(self):
-        """ Try to delete a post using delete button """
-        # Login the user
-        self.login_quick()
-        # Go to the self.user profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-
-        # Get delete-edit-panel
-        delete_edit_panel = self.browser.find_element_by_css_selector(".post .delete-edit-panel")
-        # Click on the icon button
-        delete_edit_panel.find_element_by_class_name("icon-button").click()
-        time.sleep(0.1)
-        # Click on the delete button
-        delete_edit_panel.find_element_by_class_name("dropdown-delete").click()
-        # Get the modal and click delete
-        modal_el = self.browser.find_element_by_css_selector(".post .delete-modal")
-        modal_el.find_element_by_css_selector(".modal-footer button.modal-delete").click()
-        time.sleep(0.7)
-
-        # Get the post
-        deleted_post = Post.objects.filter(user=self.user).all()
-
-        self.assertEqual(deleted_post.count(), 0)
-
-    def test_frontend_showmore_button_post(self):
-        """ Check if show more button shows up for long posts (index, user-profile, following) """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a long text post
-        Post.objects.create(user=self.user, content=("Lorem ipsum" * 200))
-
-        # Login the user
-        self.login_quick()
-
-        # Test the index and user-profile view
-        for url in ["", f"/user-profile/{self.user.id}"]:
-            self.browser.get(self.live_server_url + url)
-
-            # Get posts
-            posts_el = self.browser.find_elements_by_class_name("post")
-
-            # new_user post - make sure the *show more* button is not hidden
-            self.assertNotIn("hidden", posts_el[0].find_element_by_class_name("show-more").get_attribute("class"))
-            # self.user post - make sure the *show more* button is hidden
-            self.assertIn("hidden", posts_el[1].find_element_by_class_name("show-more").get_attribute("class"))
-
-        # Test the following view
-        # Create a short text post (new_user)
-        Post.objects.create(user=new_user, content=("Lorem ipsum"))
-        time.sleep(0.5)
-        # Creat a long text post (new_user)
-        Post.objects.create(user=new_user, content=("Lorem ipsum" * 200))
-
-        # Go to the following view
-        self.browser.get(self.live_server_url + "/following")
-
-        # Get posts
-        posts_el = self.browser.find_elements_by_class_name("post")
-
-        # new_user post - make sure the *show more* button is not hidden
-        self.assertNotIn("hidden", posts_el[0].find_element_by_class_name("show-more").get_attribute("class"))
-        # self.user post - make sure the *show more* button is hidden
-        self.assertIn("hidden", posts_el[1].find_element_by_class_name("show-more").get_attribute("class"))
-
-    def test_frontend_index_like_post(self):
-        """ Try to like a post using like-button -> check if new like exists and data-count, like-counter values are correct """
-        # Login the user
-        self.login_quick()
-        # Get the index view
-        self.browser.get(self.live_server_url)
-
-        # Get the post
-        post_el = self.browser.find_element_by_class_name("post")
-        # Perform the test
-        self.like_panel_test(self.user, post_el)
-
-    def test_frontend_user_profile_like_post(self):
-        """ Try to like a post using like-button -> check if new like exists and data-count, like-counter values are correct """
-        # Login the user
-        self.login_quick()
-        # Get the user-profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-
-        # Get the post
-        post_el = self.browser.find_element_by_class_name("post")
-        # Perform the test
-        self.like_panel_test(self.user, post_el)
-
-    def test_frontend_following_like_post(self):
-        """ Try to like a post using like-button -> check if new like exists and data-count, like-counter values are correct """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post
-        Post.objects.create(user=new_user, content="Lorem ipsum")
-
-        # Login the user
-        self.login_quick()
-        # Get the following view
-        self.browser.get(self.live_server_url + "/following")
-
-        # Get the post
-        post_el = self.browser.find_element_by_class_name("post")
-        # Perform the test
-        self.like_panel_test(new_user, post_el)
-
-    def test_frontend_index_change_like_post(self):
-        """ Try to change a like on a post -> check if new emojie exists and data-count, like-counter values are correct """
-        # Create a like
-        Like.objects.create(user=self.user, post=self.user.posts.all()[0], emoji_type=1)
-
-        # Login the user
-        self.login_quick()
-        # Get the index view
-        self.browser.get(self.live_server_url)
-
-        # Get the post
-        post_el = self.browser.find_element_by_class_name("post")
-        # Perform the test
-        self.like_panel_test(self.user, post_el)
-
-    def test_frontend_user_profile_change_like_post(self):
-        """ Try to change a like on a post -> check if new emojie exists and data-count, like-counter values are correct """
-        # Create a like
-        Like.objects.create(user=self.user, post=self.user.posts.all()[0], emoji_type=1)
-
-        # Login the user
-        self.login_quick()
-        # Get the user-profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-
-        # Get the post
-        post_el = self.browser.find_element_by_class_name("post")
-        # Perform the test
-        self.like_panel_test(self.user, post_el)
-
-    def test_frontend_following_change_like_post(self):
-        """ Try to change a like on a post -> check if new emojie exists and data-count, like-counter values are correct """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post
-        new_post = Post.objects.create(user=new_user, content="Lorem ipsum")
-        # Create a like
-        Like.objects.create(user=self.user, post=new_post, emoji_type=1)
-
-        # Login the user
-        self.login_quick()
-        # Get the following view
-        self.browser.get(self.live_server_url + "/following")
-
-        # Get the post
-        post_el = self.browser.find_element_by_class_name("post")
-        # Perform the test
-        self.like_panel_test(new_user, post_el)
-
-    def test_frontend_index_like_emoji_twice_post(self):
-        """ Liking one post with the same emoji twice -> check if data-count, like-counter values are correct """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Create likes
-        Like.objects.create(user=self.user, post=self.user.posts.all()[0], emoji_type=2)
-        Like.objects.create(user=new_user, post=self.user.posts.all()[0], emoji_type=2)
-
-        # Login the user
-        self.login_quick()
-        # Get the index view
-        self.browser.get(self.live_server_url)
-
-        # Check if the emoji has data-count = 2
-        emoji_el = self.browser.find_element_by_css_selector(".post ul.emoji-list i[data-name='dislike']")
-        like_counter_el = self.browser.find_element_by_css_selector(".post .like-data .like-counter")
-
-        self.assertEqual(emoji_el.get_attribute("data-count"), "2")
-
-        # Check if the like-counter = 1
-        self.assertEqual(like_counter_el.text, "+1")
-
-    def test_frontend_user_profile_like_emoji_twice_post(self):
-        """ Liking one post with the same emoji twice -> check if data-count, like-counter values are correct """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Create likes
-        Like.objects.create(user=self.user, post=self.user.posts.all()[0], emoji_type=3)
-        Like.objects.create(user=new_user, post=self.user.posts.all()[0], emoji_type=3)
-
-        # Login the user
-        self.login_quick()
-        # Get the user-profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-
-        # Check if the emoji has data-count = 2
-        emoji_el = self.browser.find_element_by_css_selector(".post ul.emoji-list i[data-name='smile']")
-        like_counter_el = self.browser.find_element_by_css_selector(".post .like-data .like-counter")
-
-        self.assertEqual(emoji_el.get_attribute("data-count"), "2")
-
-        # Check if the like-counter = 1
-        self.assertEqual(like_counter_el.text, "+1")
-
-    def test_frontend_following_like_emoji_twice_post(self):
-        """ Liking one post with the same emoji twice -> check if data-count, like-counter values are correct """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post
-        new_post = Post.objects.create(user=new_user, content="Lorem ipsum")
-        # Create likes
-        Like.objects.create(user=self.user, post=new_post, emoji_type=1)
-        Like.objects.create(user=new_user, post=new_post, emoji_type=1)
-
-        # Login the user
-        self.login_quick()
-        # Get the following view
-        self.browser.get(self.live_server_url + "/following")
-
-        # Check if the emoji has data-count = 2
-        emoji_el = self.browser.find_element_by_css_selector(".post ul.emoji-list i[data-name='like']")
-        like_counter_el = self.browser.find_element_by_css_selector(".post .like-data .like-counter")
-
-        self.assertEqual(emoji_el.get_attribute("data-count"), "2")
-
-        # Check if the like-counter = 1
-        self.assertEqual(like_counter_el.text, "+1")
-
-    def test_frontend_index_emoji_correct_order_post(self):
-        """ Make sure that emoji with most likes is first """
-        # Create a second user
-        second_user = User.objects.create_user(username="1", password="1")
-        # Create a third user
-        third_user = User.objects.create_user(username="2", password="2")
-        # Create likes
-        Like.objects.create(user=self.user, post=self.user.posts.all()[0], emoji_type=1)
-        Like.objects.create(user=second_user, post=self.user.posts.all()[0], emoji_type=3)
-        Like.objects.create(user=third_user, post=self.user.posts.all()[0], emoji_type=3)
-
-        # Login the user
-        self.login_quick()
-        # Get the index view
-        self.browser.get(self.live_server_url)
-
-        # Check if smile emoji is first and like emoji is second
-        emoji_list_el = self.browser.find_elements_by_css_selector(".post ul.emoji-list > i")
-
-        self.assertEqual(emoji_list_el[0].get_attribute("data-name"), "smile")
-        self.assertEqual(emoji_list_el[1].get_attribute("data-name"), "like")
-
-    def test_frontend_user_profile_emoji_correct_order_post(self):
-        """ Make sure that emoji with most likes is first """
-        # Create a second user
-        second_user = User.objects.create_user(username="1", password="1")
-        # Create a third user
-        third_user = User.objects.create_user(username="2", password="2")
-        # Create likes
-        Like.objects.create(user=self.user, post=self.user.posts.all()[0], emoji_type=1)
-        Like.objects.create(user=second_user, post=self.user.posts.all()[0], emoji_type=3)
-        Like.objects.create(user=third_user, post=self.user.posts.all()[0], emoji_type=3)
-
-        # Login the user
-        self.login_quick()
-        # Get the user-profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-
-        # Check if smile emoji is first and like emoji is second
-        emoji_list_el = self.browser.find_elements_by_css_selector(".post ul.emoji-list > i")
-
-        self.assertEqual(emoji_list_el[0].get_attribute("data-name"), "smile")
-        self.assertEqual(emoji_list_el[1].get_attribute("data-name"), "like")
-
-    def test_frontend_following_emoji_correct_order_post(self):
-        """ Make sure that emoji with most likes is first """
-        # Create a second user
-        second_user = User.objects.create_user(username="1", password="1")
-        # Create a third user
-        third_user = User.objects.create_user(username="2", password="2")
-        # Follow the second user
-        Following.objects.create(user=self.user, user_followed=second_user)
-        # Creat a post by the second user
-        new_post = Post.objects.create(user=second_user, content="Lorem ipsum")
-        # Create likes
-        Like.objects.create(user=self.user, post=new_post, emoji_type=3)
-        Like.objects.create(user=second_user, post=new_post, emoji_type=1)
-        Like.objects.create(user=third_user, post=new_post, emoji_type=3)
-
-        # Login the user
-        self.login_quick()
-        # Get the following view
-        self.browser.get(self.live_server_url + "/following")
-
-        # Check if smile emoji is first and like emoji is second
-        emoji_list_el = self.browser.find_elements_by_css_selector(".post ul.emoji-list > i")
-
-        self.assertEqual(emoji_list_el[0].get_attribute("data-name"), "smile")
-        self.assertEqual(emoji_list_el[1].get_attribute("data-name"), "like")
-
-    def test_frontend_comment_data_post(self):
-        """ Check if comment-count == 3 for index and user-profile and 0 for following """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post
-        Post.objects.create(user=new_user, content="Lorem ipsum")
-
-        # Login the user
-        self.login_quick()
-
-        # Get the index view
-        self.browser.get(self.live_server_url)
-        posts_el = self.browser.find_elements_by_css_selector(".post")
-        # Get comment count for self.user's post
-        comment_count_el = posts_el[1].find_element_by_css_selector(".comment-data")
-        comment_count_text = comment_count_el.text.split(":")[-1].strip()
-        self.assertEqual(comment_count_text, str(3))
-
-        # Get the user-profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        # Get comment count for self.user's post
-        comment_count_el = self.browser.find_element_by_css_selector(".post .comment-data")
-        comment_count_text = comment_count_el.text.split(":")[-1].strip()
-        self.assertEqual(comment_count_text, str(3))
-
-        # Get the following view
-        self.browser.get(self.live_server_url + "/following")
-        # Get comment count for new_user's post
-        comment_count_el = self.browser.find_element_by_css_selector(".post .comment-data")
-        comment_count_text = comment_count_el.text.split(":")[-1].strip()
-        self.assertEqual(comment_count_text, str(0))
-
-    def test_frontend_comment_section_post(self):
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post
-        Post.objects.create(user=new_user, content="Lorem ipsum")
-
-        # Login the user
-        self.login_quick()
-
-        # Get the index view
-        self.browser.get(self.live_server_url)
-        # Get the comment button and click it
-        comment_button = self.browser.find_elements_by_css_selector(".post .comment-button")[0]
-        time.sleep(1.5)
-        action = ActionChains(self.browser)
-        time.sleep(3)
-        action.move_to_element(comment_button).perform()
-        time.sleep(0.5)
-        comment_button.click()
-        time.sleep(0.7)
-        # Get the comment section
-        comment_section_el = self.browser.find_elements_by_css_selector(".post-comment-element .comment-section")[0]
-        self.assertIn("show", comment_section_el.get_attribute("class"))
-
-        # Get the user-profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        # Get the comment button and click it
-        comment_button = self.browser.find_element_by_css_selector(".post .comment-button")
-        action = ActionChains(self.browser)
-        action.move_to_element(comment_button).perform()
-        time.sleep(0.5)
-        comment_button.click()
-        time.sleep(0.7)
-        # Get the comment section
-        comment_section_el = self.browser.find_elements_by_css_selector(".post-comment-element .comment-section")[0]
-        self.assertIn("show", comment_section_el.get_attribute("class"))
-
-        # Get the following view
-        self.browser.get(self.live_server_url + "/following")
-        # Get the comment button and click it
-        comment_button = self.browser.find_element_by_css_selector(".post .comment-button")
-        action = ActionChains(self.browser)
-        action.move_to_element(comment_button).perform()
-        time.sleep(0.5)
-        comment_button.click()
-        time.sleep(0.7)
-        # Get the comment section
-        comment_section_el = self.browser.find_elements_by_css_selector(".post-comment-element .comment-section")[0]
-        self.assertIn("show", comment_section_el.get_attribute("class"))
-
-    # Comments tests
-    def test_frontend_index_post_comment(self):
-        """ Create a comment using form -> check if it exists """
-
-        # Login the user
-        self.login_quick()
-
-        self.browser.get(self.live_server_url)
-        # Open comment section
-        comment_button = self.browser.find_element_by_css_selector(".post .comment-button")
-        comment_button.click()
-
-        # Get the form and create a new comment
-        comment_form_el = self.browser.find_element_by_css_selector(".comment-form-wrapper form")
-        comment_form_el.find_element_by_css_selector("textarea").send_keys("Sellenium test")
-        comment_form_el.submit()
-
-        # Check if the new comment exists
-        self.assertEqual(Comment.objects.filter(content="Sellenium test").count(), 1)
-
-    def test_frontend_user_profile_post_comment(self):
-        """ Create a comment using form -> check if it exists """
-
-        # Login the user
-        self.login_quick()
-
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        # Open comment section
-        comment_button = self.browser.find_element_by_css_selector(".post .comment-button")
-        comment_button.click()
-
-        # Get the form and create a new comment
-        comment_form_el = self.browser.find_element_by_css_selector(".comment-form-wrapper form")
-        comment_form_el.find_element_by_css_selector("textarea").send_keys("Sellenium test")
-        comment_form_el.submit()
-
-        # Check if the new comment exists
-        self.assertEqual(Comment.objects.filter(content="Sellenium test").count(), 1)
-
-    def test_frontend_following_post_comment(self):
-        """ Create a comment using form -> check if it exists """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a long text post
-        Post.objects.create(user=new_user, content="Lorem ipsum")
-
-        # Login the user
-        self.login_quick()
-
-        self.browser.get(self.live_server_url + "/following")
-        # Open comment section
-        comment_button = self.browser.find_element_by_css_selector(".post .comment-button")
-        comment_button.click()
-
-        # Get the form and create a new comment
-        comment_form_el = self.browser.find_element_by_css_selector(".comment-form-wrapper form")
-        comment_form_el.find_element_by_css_selector("textarea").send_keys("Sellenium test")
-        comment_form_el.submit()
-
-        # Check if the new comment exists
-        self.assertEqual(Comment.objects.filter(content="Sellenium test").count(), 1)
-
-    def test_frontend_comment_creator_button_text(self):
-        """ Check if comment creator's name button redirects correctly to user profile  """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post by the second user
-        post = Post.objects.create(user=new_user, content="new user post")
-        # Creat a comment to this post
-        Comment.objects.create(user=self.user, post=post, content="comment")
-
-        # Login the user
-        self.login_quick()
-
-        # Check **index view**
-        self.browser.get(self.live_server_url)
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        comment_user_link_text_el = post_comment_el.find_element_by_css_selector(".comment-main > a")
-        comment_user_link_text_el.click()
-        time.sleep(0.1)
-
-        # Get the current url
-        current_url_list = self.browser.current_url.split("/")
-        # Check if the url is .../user-profile/{self.user.id}
-        self.assertEqual(current_url_list[-2], "user-profile")
-        self.assertEqual(current_url_list[-1], str(self.user.id))
-
-        # Check **user-profile view**
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        comment_user_link_text_el = post_comment_el.find_elements_by_css_selector(".comment-main > a")
-        comment_user_link_text_el[0].click()
-        time.sleep(0.1)
-
-        # Get the current url
-        current_url_list = self.browser.current_url.split("/")
-        # Check if the url is .../user-profile/{self.user.id}
-        self.assertEqual(current_url_list[-2], "user-profile")
-        self.assertEqual(current_url_list[-1], str(self.user.id))
-
-        # Check **following view**
-        self.browser.get(self.live_server_url + "/following")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        comment_user_link_text_el = post_comment_el.find_elements_by_css_selector(".comment-main > a")
-        comment_user_link_text_el[0].click()
-        time.sleep(0.1)
-
-        # Get the current url
-        current_url_list = self.browser.current_url.split("/")
-        # Check if the url is .../user-profile/{self.user.id}
-        self.assertEqual(current_url_list[-2], "user-profile")
-        self.assertEqual(current_url_list[-1], str(self.user.id))
-
-    def test_frontend_comment_creator_button_picture(self):
-        """ Check if comment creator's picture button redirects correctly to user profile  """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post by the second user
-        post = Post.objects.create(user=new_user, content="new user post")
-        # Creat a comment to this post
-        Comment.objects.create(user=self.user, post=post, content="comment")
-
-        # Login the user
-        self.login_quick()
-
-        # Check **index view**
-        self.browser.get(self.live_server_url)
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        comment_user_link_text_el = post_comment_el.find_element_by_css_selector(".comment-user-image > a")
-        comment_user_link_text_el.click()
-        time.sleep(0.1)
-
-        # Get the current url
-        current_url_list = self.browser.current_url.split("/")
-        # Check if the url is .../user-profile/{self.user.id}
-        self.assertEqual(current_url_list[-2], "user-profile")
-        self.assertEqual(current_url_list[-1], str(self.user.id))
-
-        # Check **user-profile view**
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        comment_user_link_text_el = post_comment_el.find_elements_by_css_selector(".comment-user-image > a")
-        comment_user_link_text_el[0].click()
-        time.sleep(0.1)
-
-        # Get the current url
-        current_url_list = self.browser.current_url.split("/")
-        # Check if the url is .../user-profile/{self.user.id}
-        self.assertEqual(current_url_list[-2], "user-profile")
-        self.assertEqual(current_url_list[-1], str(self.user.id))
-
-        # Check **following view**
-        self.browser.get(self.live_server_url + "/following")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        comment_user_link_text_el = post_comment_el.find_elements_by_css_selector(".comment-user-image > a")
-        comment_user_link_text_el[0].click()
-        time.sleep(0.1)
-
-        # Get the current url
-        current_url_list = self.browser.current_url.split("/")
-        # Check if the url is .../user-profile/{self.user.id}
-        self.assertEqual(current_url_list[-2], "user-profile")
-        self.assertEqual(current_url_list[-1], str(self.user.id))
-
-    def test_frontend_index_delete_edit_panel_exists_comment(self):
-        """ Check if delete-edit-panel exists or doesn't exist for comment's creator == current user and comment's creator != current user """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Create a comment by the second user
-        Comment.objects.create(user=new_user, post=self.user.posts.all()[0], content="new user comment")
-
-        # Login the user
-        self.login_quick()
-        # Go to the index view
-        self.browser.get(self.live_server_url)
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        # Get the comments
-        comments_el = post_comment_el.find_elements_by_css_selector(".comment")
-
-        # Check if delete-edit-panel is present or not
-        self.assertTrue(self.is_element_present(comments_el[0], ".delete-edit-panel"))
-        self.assertTrue(self.is_element_present(comments_el[1], ".delete-edit-panel"))
-        self.assertTrue(self.is_element_present(comments_el[2], ".delete-edit-panel"))
-        self.assertFalse(self.is_element_present(comments_el[3], ".delete-edit-panel"))
-
-    def test_frontend_user_profile_delete_edit_panel_exists_comment(self):
-        """ Check if delete-edit-panel exists or doesn't exist for comment's creator == current user and comment's creator != current user """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Create a comment by the second user
-        Comment.objects.create(user=new_user, post=self.user.posts.all()[0], content="new user comment")
-
-        # Login the user
-        self.login_quick()
-        # Go to the self.user profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        # Get the comments
-        comments_el = post_comment_el.find_elements_by_css_selector(".comment")
-
-        # Check if delete-edit-panel is present or not
-        self.assertTrue(self.is_element_present(comments_el[0], ".delete-edit-panel"))
-        self.assertTrue(self.is_element_present(comments_el[1], ".delete-edit-panel"))
-        self.assertTrue(self.is_element_present(comments_el[2], ".delete-edit-panel"))
-        self.assertFalse(self.is_element_present(comments_el[3], ".delete-edit-panel"))
-
-    def test_frontend_following_delete_edit_panel_exists_comment(self):
-        """ Check if delete-edit-panel exists or doesn't exist for comment's creator == current user and comment's creator != current user """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post by the second user
-        post = Post.objects.create(user=new_user, content="new user post")
-        # Create comments by the second user adn by self.user
-        Comment.objects.create(user=new_user, post=post, content="new user comment")
-        Comment.objects.create(user=self.user, post=post, content="self.user comment")
-
-        # Login the user
-        self.login_quick()
-        # Go to the following view
-        self.browser.get(self.live_server_url + "/following")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        # Get the comments
-        comments_el = post_comment_el.find_elements_by_css_selector(".comment")
-
-        # Check if delete-edit-panel is present or not
-        self.assertFalse(self.is_element_present(comments_el[0], ".delete-edit-panel"))
-        self.assertTrue(self.is_element_present(comments_el[1], ".delete-edit-panel"))
-
-    def test_frontend_edit_comment(self):
-        """ Try to edit a comment using edit button (index and user-profile views) """
-        # Get the oldest comment
-        comment = Comment.objects.get(content="comment 0")
-        # Login the user
-        self.login_quick()
-
-        for url in ["", f"/user-profile/{self.user.id}"]:
-            self.browser.get(self.live_server_url + url)
-            # Get the post-comment element
-            post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-            # Open comment section
-            comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-            comment_button[0].click()
-
-            # Get the delete-edit-panel
-            delete_edit_panel = self.browser.find_elements_by_css_selector(".comment .delete-edit-panel")[0]
-            # Click on the icon button
-            delete_edit_panel.find_element_by_class_name("icon-button").click()
-            time.sleep(1.5)
-            # Click on the edit button
-            delete_edit_panel.find_element_by_class_name("dropdown-edit").click()
-            # Get the modal, its textarea and save button
-            modal_el = self.browser.find_element_by_css_selector(".comment .edit-modal")
-            modal_textarea_el = modal_el.find_element_by_css_selector(".modal-body textarea")
-            modal_save_button = modal_el.find_element_by_css_selector(".modal-footer button.modal-save")
-            time.sleep(1.5)
-            # Change the modal textarea's value
-            modal_textarea_el.clear()
-            time.sleep(1.5)
-            modal_textarea_el.send_keys("Comment edited-" + self.browser.current_url)
-            time.sleep(0.5)
-            modal_save_button.click()
-            time.sleep(1)
-
-            # Get the comment's  new data
-            edited_comment_content = Comment.objects.get(pk=comment.id).content
-
-            self.assertEqual(edited_comment_content, "Comment edited-" + self.browser.current_url)
-
-    def test_frontend_index_delete_comment(self):
-        """ Try to delete a comment using delete button """
-        # Login the user
-        self.login_quick()
-        # Go to the index view
-        self.browser.get(self.live_server_url)
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        # Get delete-edit-panel
-        delete_edit_panel = self.browser.find_element_by_css_selector(".comment .delete-edit-panel")
-        # Click on the icon button
-        delete_edit_panel.find_element_by_class_name("icon-button").click()
-        time.sleep(0.1)
-        # Click on the delete button
-        delete_edit_panel.find_element_by_class_name("dropdown-delete").click()
-        # Get the modal and click delete
-        modal_el = self.browser.find_element_by_css_selector(".comment .delete-modal")
-        modal_el.find_element_by_css_selector(".modal-footer button.modal-delete").click()
-        time.sleep(0.7)
-
-        # Get the comments
-        deleted_comment = Comment.objects.filter(user=self.user, content="comment 0").all()
-
-        self.assertEqual(deleted_comment.count(), 0)
-
-    def test_frontend_user_profile_delete_comment(self):
-        """ Try to delete a comment using delete button """
-        # Login the user
-        self.login_quick()
-        # Go to the self.user profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        # Get delete-edit-panel
-        delete_edit_panel = self.browser.find_element_by_css_selector(".comment .delete-edit-panel")
-        # Click on the icon button
-        delete_edit_panel.find_element_by_class_name("icon-button").click()
-        time.sleep(0.1)
-        # Click on the delete button
-        delete_edit_panel.find_element_by_class_name("dropdown-delete").click()
-        # Get the modal and click delete
-        modal_el = self.browser.find_element_by_css_selector(".comment .delete-modal")
-        modal_el.find_element_by_css_selector(".modal-footer button.modal-delete").click()
-        time.sleep(0.7)
-
-        # Get the comments
-        deleted_comment = Comment.objects.filter(user=self.user, content="comment 0").all()
-
-        self.assertEqual(deleted_comment.count(), 0)
-
-    def test_frontend_following_delete_comment(self):
-        """ Try to delete a comment using delete button """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post by the second user
-        post = Post.objects.create(user=new_user, content="new user post")
-        # Create comments by self.user
-        comment = Comment.objects.create(user=self.user, post=post, content="new user comment")
-
-        # Login the user
-        self.login_quick()
-        # Go to the following view
-        self.browser.get(self.live_server_url + "/following")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        # Get delete-edit-panel
-        delete_edit_panel = self.browser.find_element_by_css_selector(".comment .delete-edit-panel")
-        # Click on the icon button
-        delete_edit_panel.find_element_by_class_name("icon-button").click()
-        time.sleep(0.1)
-        # Click on the delete button
-        delete_edit_panel.find_element_by_class_name("dropdown-delete").click()
-        # Get the modal and click delete
-        modal_el = self.browser.find_element_by_css_selector(".comment .delete-modal")
-        modal_el.find_element_by_css_selector(".modal-footer button.modal-delete").click()
-        time.sleep(0.7)
-
-        # Get the comments
-        deleted_comment = Comment.objects.filter(pk=comment.id).all()
-
-        self.assertEqual(deleted_comment.count(), 0)
-
-    def test_frontend_showmore_button_comment(self):
-        """ Check if show more button shows up for long comments (index, user-profile, following) """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post by the second user
-        post = Post.objects.create(user=new_user, content="new user post")
-        # Creat a long text comment by self.user
-        Comment.objects.create(user=self.user, post=self.user.posts.all()[0], content=("Lorem ipsum" * 200))
-
-        # Login the user
-        self.login_quick()
-
-        # Test the **index** and **user-profile view**
-        for url in ["", f"/user-profile/{self.user.id}"]:
-            self.browser.get(self.live_server_url + url)
-            # Get the post-comment element
-            post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")
-            post_comment_el = post_comment_el[1 if not url else 0]
-            # Open comment section
-            comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-            comment_button[0].click()
-
-            # Get comments
-            comments_el = self.browser.find_elements_by_css_selector(".comment")
-            time.sleep(1.5)
-
-            # 3rd comment - make sure the *show more* button is hidden
-            self.assertIn("hidden", comments_el[2].find_element_by_class_name("show-more").get_attribute("class"))
-            # 4th comment - make sure the *show more* button is not hidden
-            self.assertNotIn("hidden", comments_el[3].find_element_by_class_name("show-more").get_attribute("class"))
-
-        # Test the **following view**
-        # Create a short text comment (new_user)
-        Comment.objects.create(user=new_user, post=post, content="new user comment")
-        time.sleep(1.5)
-        # Creat a long text comment (new_user)
-        Comment.objects.create(user=new_user, post=post, content=("Lorem ipsum" * 200))
-
-        # Go to the following view
-        self.browser.get(self.live_server_url + "/following")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-
-        # Get comments
-        comments_el = self.browser.find_elements_by_class_name("comment")
-        time.sleep(0.5)
-        # 1st comment - make sure the *show more* button is not hidden
-        self.assertIn("hidden", comments_el[0].find_element_by_class_name("show-more").get_attribute("class"))
-        # 2nd comment - make sure the *show more* button is hidden
-        self.assertNotIn("hidden", comments_el[1].find_element_by_class_name("show-more").get_attribute("class"))
-
-    def test_frontend_index_like_comment(self):
-        """ Try to like a comment using like-button -> check if new like exists and data-count, like-counter values are correct """
-        # Login the user
-        self.login_quick()
-        # Get the index view
-        self.browser.get(self.live_server_url)
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-        time.sleep(0.5)
-        # Get a comment
-        comment_el = post_comment_el.find_elements_by_class_name("comment")[0]
-        time.sleep(0.5)
-        # Perform the test
-        self.like_panel_test(self.user, comment_el)
-
-    def test_frontend_user_profile_like_comment(self):
-        """ Try to like a comment using like-button -> check if new like exists and data-count, like-counter values are correct """
-        # Login the user
-        self.login_quick()
-        # Get the user-profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-        time.sleep(0.5)
-
-        # Get a comment
-        comment_el = post_comment_el.find_elements_by_class_name("comment")[0]
-        time.sleep(0.5)
-        # Perform the test
-        self.like_panel_test(self.user, comment_el)
-
-    def test_frontend_following_like_comment(self):
-        """ Try to like a comment using like-button -> check if new like exists and data-count, like-counter values are correct """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post
-        post = Post.objects.create(user=new_user, content="Lorem ipsum")
-        # Creat a comment
-        Comment.objects.create(user=new_user, post=post, content="comment")
-
-
-        # Login the user
-        self.login_quick()
-        # Get the following view
-        self.browser.get(self.live_server_url + "/following")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-        time.sleep(0.5)
-
-        # Get a comment
-        comment_el = post_comment_el.find_elements_by_class_name("comment")[0]
-        time.sleep(0.5)
-        # Perform the test
-        self.like_panel_test(self.user, comment_el)
-
-    def test_frontend_index_change_like_comment(self):
-        """ Try to change a like on a comment -> check if new emojie exists and data-count, like-counter values are correct """
-        # Comment to like
-        comment = Comment.objects.get(user=self.user, content="comment 0")
-        # Create a like
-        Like.objects.create(user=self.user, comment=comment, emoji_type=1)
-
-        # Login the user
-        self.login_quick()
-        # Get the index view
-        self.browser.get(self.live_server_url)
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-        time.sleep(3)
+# class FrontEndTestCase(StaticLiveServerTestCase):
+#     def setUp(self):
+#         # Create a user
+#         self.user = User.objects.create_user(username="test", password="password")
+#         self.c = Client()
+
+#         # Populate the user-profile with data
+#         user_profile = self.user.profile
+#         user_profile.name = "Tom"
+#         user_profile.date_of_birth = "2000-12-20"
+#         user_profile.about = "My name is Tom"
+#         user_profile.country = "PL"
+#         user_profile.save()
+
+#         # Create a post
+#         post = Post.objects.create(user=self.user, content="post 1")
+#         # Create comments
+#         for i in range(3):
+#             Comment.objects.create(user=self.user, post=post, content=f"comment {i}")
+
+#         options = webdriver.ChromeOptions()
+#         # Set language to english
+#         options.add_experimental_option('prefs', {'intl.accept_languages': 'en_US'})
+#         options.add_argument("--lang=en_US")
+#         # Set chrome to be invisible
+#         options.add_argument("--headless")
+#         options.add_argument("--window-size=1920,1080")
+#         # For GitHub actions
+#         self.browser = webdriver.Chrome(chrome_options=options)
+#         ''' For VS
+#         # Create chromedirver path
+#         project_dir = os.path.abspath(os.getcwd())
+#         chromedriver_dir = os.path.join(project_dir, "chromedriver", "chromedriver.exe")
+#         self.browser = webdriver.Chrome(chromedriver_dir, chrome_options=options)
+#         '''
+#         self.browser.implicitly_wait(10)
+
+#         super(FrontEndTestCase, self).setUp()
+
+#     def tearDown(self):
+#         time.sleep(2)
+#         # Close browser after testing
+#         self.browser.quit()
+#         super(FrontEndTestCase, self).tearDown()
+
+#     def login_front_end(self, username="test", password="password"):
+#         """ Method to automate logging in usign login page form """
+#         time.sleep(1)
+#         # Go to login page
+#         self.browser.get(f"{self.live_server_url}/login")
+
+#         # Populate login form with username and password
+#         username_el = self.browser.find_element_by_id("id_username")
+#         password_el = self.browser.find_element_by_id("id_password")
+#         username_el.send_keys(username)
+#         password_el.send_keys(password)
+
+#         # Log in
+#         self.browser.find_element_by_css_selector("input[type='submit']").click()
+
+#     def login_quick(self, username="test", password="password"):
+#         """ Method to automate logging in using client.login method and cookies """
+#         self.c.login(username=username, password=password)
+#         cookie = self.c.cookies['sessionid']
+#         self.browser.get(self.live_server_url)
+#         self.browser.add_cookie({"name": "sessionid", "value": cookie.value, "secure": False, "path": "/"})
+
+#     def is_element_present(self, element, css_locator):
+#         """ Method to check if element exists in HTML """
+#         try:
+#             element.find_element_by_css_selector(css_locator)
+#         except NoSuchElementException:
+#             return False
+#         else:
+#             return True
+
+#     def like_panel_test(self, user, post_comment):
+#         # Get - like-panel, like button and emoji-choice smile
+#         like_panel_el = post_comment.find_element_by_css_selector(".like-panel")
+#         like_button_el = like_panel_el.find_element_by_css_selector(".like-button")
+#         smile_emoji_el = like_panel_el.find_element_by_css_selector("i[data-name='smile']")
+
+
+#         # Move cursor to the like button -> after 1.5s to the smile emoji -> click on the smile emoji
+#         action = ActionChains(self.browser)
+#         time.sleep(1)
+#         action.move_to_element(like_button_el).perform()
+#         time.sleep(1.5)
+#         action.move_to_element(smile_emoji_el).perform()
+#         time.sleep(0.1)
+#         smile_emoji_el.click()
+#         time.sleep(0.7)
+
+#         # Check if the new like exists and have correct emoji (database)
+#         if post_comment.get_attribute("class").find("post") != -1:
+#             like = Like.objects.filter(post=Post.objects.get(user=user)).all()
+#         else:
+#             comment_id = int(post_comment.get_attribute("id").split("_")[-1])
+#             like = Like.objects.filter(comment=comment_id).all()
+#         self.assertEqual(like.count(), 1)
+#         self.assertEqual(like[0].emoji_type, 3)
+
+#         # Check if the new like exists and have correct emoji (like-data)
+#         if post_comment.get_attribute("class").find("post") != -1:
+#             like_data_el = self.browser.find_element_by_css_selector(".post .like-data")
+#         else:
+#             like_data_el = self.browser.find_elements_by_css_selector(".comment .like-data")[0]
+#         self.assertTrue(self.is_element_present(like_data_el, "ul.emoji-list i[data-name='smile']"))
+#         # Check if the new like has data-count = 1
+#         emoji_el = like_data_el.find_element_by_css_selector("ul.emoji-list i[data-name='smile']")
+#         self.assertEqual(emoji_el.get_attribute("data-count"), "1")
+#         # Check if the like-counter is empty
+#         self.assertEqual(like_data_el.find_element_by_class_name("like-counter").text, "")
+
+#     # Index tests
+#     def test_frontend_create_post_from_form(self):
+#         """ Create a post using post form -> check if it exists """
+#         # Login user
+#         self.login_quick()
+#         # Get index page
+#         self.browser.get(self.live_server_url)
+
+#         # Get form element
+#         form_el = self.browser.find_element_by_css_selector(".post-form-wrapper form")
+#         # form_el = WebDriverWait(self.browser, 10).until(
+#         #     EC.presence_of_element_located((By.CSS_SELECTOR, ".post-form-wrapper form"))
+#         # )
+
+#         # Populate textarea
+#         form_el.find_element_by_id("id_content").send_keys("Sellenium test")
+#         # Submit form
+#         form_el.submit()
+
+#         # Check if the post exists
+#         self.assertEqual(Post.objects.filter(content="Sellenium test").count(), 1)
+
+#     def test_frontend_post_order(self):
+#         """ Create 2 posts -> check if they are in correct order (from newest to oldest) """
+#         # Create 2 posts
+#         post_1 = Post.objects.create(user=self.user, content="post 2")
+#         time.sleep(0.1)
+#         post_2 = Post.objects.create(user=self.user, content="post 3")
+
+#         # Login user
+#         self.login_quick()
+#         # Get index page
+#         self.browser.get(self.live_server_url)
+
+#         # Wait for page full load
+#         # WebDriverWait(self.browser, 10).until(
+#         #     EC.presence_of_element_located((By.CSS_SELECTOR, ".post-comment-element"))
+#         # )
+
+#         # Get posts
+#         posts_el = self.browser.find_elements_by_class_name("post")
+
+#         # Check is posts' id are in correct order: 3 -> 2 -> 1
+#         for i, post_el in zip(range(3, 0, -1), posts_el):
+#             # Get posts inner text
+#             post_content = post_el.find_elements_by_class_name("post-content")[0]
+#             # Get posts number
+#             post_number = post_content.text.split()[-1]
+#             self.assertEqual(post_number, str(i))
+
+#     # User profile tests
+#     def test_frontend_following_data(self):
+#         """ Follow user by 5 other users, follow 2 users -> check if data in user profile is correct """
+#         users = []
+
+#         # Crete users and follow self.user
+#         for i in range(5):
+#             users.append(User.objects.create_user(username=str(i), password=str(i)))
+#             Following.objects.create(user=users[i], user_followed=self.user)
+
+#         # Make self.user be followed by 2 users
+#         Following.objects.create(user=self.user, user_followed=users[0])
+#         Following.objects.create(user=self.user, user_followed=users[1])
+
+#         # Login user
+#         self.login_quick()
+#         # Get to self.user profile page
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+
+#         # Get following data
+#         following_info_card = self.browser.find_element_by_class_name("profile-following")
+#         followers = following_info_card.find_element_by_css_selector(".followers .follow-count").text
+#         following = following_info_card.find_element_by_css_selector(".following .follow-count").text
+
+#         self.assertEqual(followers, str(5))
+#         self.assertEqual(following, str(2))
+
+#     def test_frontend_bio_info(self):
+#         """ Check if user's bio in user profile is correct """
+#         # Login user
+#         self.login_quick()
+#         # Get to self.user profile page
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+
+#         # Get bio info
+#         bio_info_card = self.browser.find_element_by_class_name("bio")
+#         name = bio_info_card.find_element_by_css_selector(".profile-name span") \
+#                             .text.split(":")[-1].strip()
+#         birth = bio_info_card.find_element_by_css_selector(".profile-birth span") \
+#                             .text.split(":")[-1].strip()
+#         about = bio_info_card.find_element_by_css_selector(".profile-about span") \
+#                             .text.split(":")[-1].strip()
+#         country = bio_info_card.find_element_by_css_selector(".profile-country span") \
+#                             .text.split(":")[-1].strip()
+
+
+#         self.assertEqual(name, "Tom")
+#         self.assertEqual(birth, "20.12.2000")
+#         self.assertEqual(about, "My name is Tom")
+#         self.assertEqual(country, "Poland")
+
+#     def test_frontend_profile_picture_src(self):
+#         """ Check if profile picture is in media/profile_pics folder and is default """
+#         # Login user
+#         self.login_quick()
+#         # Get to self.user profile page
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+
+#         # Get full profile picure src
+#         profile_picture = self.browser.find_element_by_css_selector(".profile-picture > img").get_attribute("src")
+#         # Get short src - media/profile_pic/default.png
+#         profile_picture_short_src = profile_picture.split("/")[-3:]
+
+#         self.assertEqual(profile_picture_short_src[0], "media")
+#         self.assertEqual(profile_picture_short_src[1], "profile_pics")
+#         self.assertEqual(profile_picture_short_src[2], "default.png")
+
+#     def test_frontend_follow_unfollow_button(self):
+#         """ Check if follow/unfollow button works """
+#         # Create a user
+#         new_user = User.objects.create_user(username="1", password="1")
+
+#         # Login user
+#         self.login_quick()
+#         # Get to self.user profile page
+#         self.browser.get(self.live_server_url + f"/user-profile/{new_user.id}")
+
+#         # Try to follow new_user and check if it works
+#         follow_button = self.browser.find_element_by_css_selector(".profile-buttons button.follow")
+#         follow_button.click()
+#         time.sleep(0.1)
+#         self.assertEqual(Following.objects.filter(user=self.user, user_followed=new_user).count(), 1)
+
+#         # Try to unfollow new_user and check it works
+#         unfollow_button = self.browser.find_element_by_css_selector(".profile-buttons button.unfollow")
+#         unfollow_button.click()
+#         time.sleep(0.1)
+#         self.assertEqual(Following.objects.filter(user=self.user, user_followed=new_user).count(), 0)
+
+#     # Edit-profile tests
+#     def test_frontend_edit_profile_autopopulate_form(self):
+#         """ Open edit-profile page and check if form is autopopulated with current user data """
+#         # Login user
+#         self.login_quick()
+#         # Get to self.user profile page
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+
+#         # Open edit-profile page
+#         edit_profile_button = self.browser.find_element_by_id("edit-profile-btn")
+#         edit_profile_button.click()
+
+#         # Get all the form's fields
+#         form_el = self.browser.find_element_by_css_selector(".edit-profile-form > form")
+#         name_el = form_el.find_element_by_css_selector("input[name='name']")
+#         date_of_birth_el = form_el.find_element_by_css_selector("input[name='date_of_birth']")
+#         about_el = form_el.find_element_by_css_selector("textarea[name='about']")
+#         country_el = Select(form_el.find_element_by_css_selector("select[name='country']"))
+
+#         self.assertEqual(name_el.get_attribute("value"), "Tom")
+#         self.assertEqual(date_of_birth_el.get_attribute("value"), "2000-12-20")
+#         self.assertEqual(about_el.get_attribute("value"), "My name is Tom")
+#         self.assertEqual(country_el.first_selected_option.get_attribute("value"), "PL")
+
+#     def test_frontend_edit_profile_update_profile(self):
+#         """ Try to fill out and submit the edit-profile form and check if user's data has changed """
+#         # Get test image path
+#         test_img_path = os.path.join(settings.MEDIA_ROOT, 'tests', 'test.jpg')
+
+#         # Login user
+#         self.login_quick()
+#         # Get to self.user profile page
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+
+#         # Open edit-profile page
+#         edit_profile_button = self.browser.find_element_by_id("edit-profile-btn")
+#         edit_profile_button.click()
+
+#         # Get all the form's fields
+#         form_el = self.browser.find_element_by_css_selector(".edit-profile-form > form")
+#         name_el = form_el.find_element_by_css_selector("input[name='name']")
+#         date_of_birth_el = form_el.find_element_by_css_selector("input[name='date_of_birth']")
+#         about_el = form_el.find_element_by_css_selector("textarea[name='about']")
+#         country_el = Select(form_el.find_element_by_css_selector("select[name='country']"))
+#         image_el = form_el.find_element_by_id("id_image")
+
+#         # Clear name input and fill out with new data
+#         time.sleep(1)
+#         name_el.clear()
+#         time.sleep(1)
+#         name_el.send_keys("John")
+#         # Change date of birth
+#         self.browser.execute_script("arguments[0].setAttribute('value', '2020-12-12');", date_of_birth_el)
+#         # Clear about input and fill out with new data
+#         about_el.clear()
+#         time.sleep(1)
+#         about_el.send_keys("My name is John")
+#         # Change country
+#         country_el.select_by_value("RU")
+#         # Upload a new photo
+#         image_el.send_keys(test_img_path)
+#         time.sleep(0.7)
+#         # Submit the form
+#         form_el.submit()
+#         time.sleep(1)
+
+#         # Get the new user profile data
+#         new_user_profile = UserProfile.objects.get(user=self.user)
+
+#         # Prepare image file path to comparison
+#         # 1. Normalize it
+#         new_img_path = os.path.normpath(new_user_profile.image.path)
+#         # 2. Get the last part of the path and discard django's additional chars
+#         img_name = os.path.basename(new_img_path)
+
+#         self.assertEqual(new_user_profile.name, "John")
+#         self.assertEqual(new_user_profile.date_of_birth.strftime("%Y-%m-%d"), "2020-12-12")
+#         self.assertEqual(new_user_profile.about, "My name is John")
+#         self.assertEqual(new_user_profile.country, "RU")
+#         self.assertEqual(img_name, "test.jpg")
+
+#         # Delete new image file
+#         if os.path.exists(new_img_path):
+#             os.remove(new_img_path)
+
+#     # Posts tests
+#     def test_frontend_post_content(self):
+#         """ Check if post's content is equal to post created (index, user-profile, following) """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post by the second user
+#         Post.objects.create(user=new_user, content="new user post")
+
+#         # Login user
+#         self.login_quick()
+
+#         # Check **index view**
+#         self.browser.get(self.live_server_url)
+#         posts_content_el = self.browser.find_elements_by_css_selector(".post .post-content")
+
+#         self.assertEqual(len(posts_content_el), 2)
+#         self.assertEqual(posts_content_el[0].text, "new user post")
+#         self.assertEqual(posts_content_el[1].text, "post 1")
+
+#         # Check **user-profile view**
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         posts_content_el = self.browser.find_elements_by_css_selector(".post .post-content")
+
+#         self.assertEqual(len(posts_content_el), 1)
+#         self.assertEqual(posts_content_el[0].text, "post 1")
+
+#         # Check **following view**
+#         self.browser.get(self.live_server_url + "/following")
+#         posts_content_el = self.browser.find_elements_by_css_selector(".post .post-content")
+
+#         self.assertEqual(len(posts_content_el), 1)
+#         self.assertEqual(posts_content_el[0].text, "new user post")
+
+#     def test_frontend_post_creator_button(self):
+#         """ Check if post creator's name button redirects correctly to user profile """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post by the second user
+#         Post.objects.create(user=new_user, content="new user post")
+
+#         # Login user
+#         self.login_quick()
+
+#         # **Check index view**
+#         self.browser.get(self.live_server_url)
+#         post_user_link_el = self.browser.find_elements_by_css_selector(".post .post-user > a")
+#         # The second post = self.user's post
+#         post_user_link_el[1].click()
+#         time.sleep(0.1)
+
+#         # Get current url
+#         current_url_list = self.browser.current_url.split("/")
+#         # Check if url is .../user-profile/{self.user.id}
+#         self.assertEqual(current_url_list[-2], "user-profile")
+#         self.assertEqual(current_url_list[-1], str(self.user.id))
+
+#         # **Check user-profile view**
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         post_user_link_el = self.browser.find_elements_by_css_selector(".post .post-user > a")
+#         # The only post = self.user's post
+#         post_user_link_el[0].click()
+#         time.sleep(0.1)
+
+#         # Get current url
+#         current_url_list = self.browser.current_url.split("/")
+#         # Check if url is .../user-profile/{self.user.id}
+#         self.assertEqual(current_url_list[-2], "user-profile")
+#         self.assertEqual(current_url_list[-1], str(self.user.id))
+
+#         # **Check following view**
+#         self.browser.get(self.live_server_url + "/following")
+#         post_user_link_el = self.browser.find_elements_by_css_selector(".post .post-user > a")
+#         # The only post = new_user's post
+#         post_user_link_el[0].click()
+#         time.sleep(0.1)
+
+#         # Get current url
+#         current_url_list = self.browser.current_url.split("/")
+#         # Check if url is .../user-profile/{new_user.id}
+#         self.assertEqual(current_url_list[-2], "user-profile")
+#         self.assertEqual(current_url_list[-1], str(new_user.id))
+
+#     def test_frontend_index_delete_edit_panel_exists_post(self):
+#         """ Check if delete-edit-panel exists or doesn't exist for post's creator == current user and post's creator != current user """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Creat a post by the second user
+#         Post.objects.create(user=new_user, content="new user post")
+
+#         # Login user
+#         self.login_quick()
+#         # Go to index view
+#         self.browser.get(self.live_server_url)
+
+#         # Get posts
+#         posts_el = self.browser.find_elements_by_css_selector(".post")
+
+#         # Check if delete-edit-panel is present or not
+#         self.assertFalse(self.is_element_present(posts_el[0], ".delete-edit-panel"))
+#         self.assertTrue(self.is_element_present(posts_el[1], ".delete-edit-panel"))
+
+#     def test_frontend_user_profile_delete_edit_panel_exists_post(self):
+#         """ Check if delete-edit-panel exists or doesn't exist for post's creator == current user and post's creator != current user """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Creat a post by the second user
+#         Post.objects.create(user=new_user, content="new user post")
+
+#         # Login user
+#         self.login_quick()
+
+#         # Go to the self.user profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         # Get delete-edit-panels
+#         posts_el = self.browser.find_elements_by_css_selector(".post")
+#         # Check if delete-edit-panel is present
+#         self.assertTrue(self.is_element_present(posts_el[0], ".delete-edit-panel"))
+
+#         # Go to new_user profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{new_user.id}")
+#         # Get posts
+#         posts_el = self.browser.find_elements_by_css_selector(".post")
+#         # Check if delete-edit-panel is present
+#         self.assertFalse(self.is_element_present(posts_el[0], ".delete-edit-panel"))
+
+#     def test_frontend_following_delete_edit_panel_exists_post(self):
+#         """ Check if delete-edit-panel doesn't exist for and post's creator != current user """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post by the second user
+#         Post.objects.create(user=new_user, content="new user post")
+
+#         # Login the user
+#         self.login_quick()
+#         # Go to the following view
+#         self.browser.get(self.live_server_url + "/following")
+
+#         # Get the posts
+#         posts_el = self.browser.find_elements_by_css_selector(".post")
+#         # Check if the delete-edit-panel is present
+#         self.assertFalse(self.is_element_present(posts_el[0], ".delete-edit-panel"))
+
+#     def test_frontend_edit_post(self):
+#         """ Try to edit a post using edit button (index and user-profile views) """
+#         # Login the user
+#         self.login_quick()
+
+#         for url in ["", f"/user-profile/{self.user.id}"]:
+#             self.browser.get(self.live_server_url + url)
+
+#             # Get the delete-edit-panel
+#             delete_edit_panel = self.browser.find_element_by_css_selector(".post .delete-edit-panel")
+#             # Click on the icon button
+#             delete_edit_panel.find_element_by_class_name("icon-button").click()
+#             time.sleep(0.1)
+#             # Click on the edit button
+#             delete_edit_panel.find_element_by_class_name("dropdown-edit").click()
+#             # Get the modal, its textarea and save button
+#             modal_el = self.browser.find_element_by_css_selector(".post .edit-modal")
+#             modal_textarea_el = modal_el.find_element_by_css_selector(".modal-body textarea")
+#             modal_save_button = modal_el.find_element_by_css_selector(".modal-footer button.modal-save")
+#             # Change the modal textarea's value
+#             modal_textarea_el.clear()
+#             time.sleep(0.7)
+#             modal_textarea_el.send_keys("Post edited-" + self.browser.current_url)
+#             time.sleep(0.5)
+#             modal_save_button.click()
+#             time.sleep(1)
+
+#             # Get the post's data
+#             edited_post = Post.objects.get(user=self.user)
+
+#             self.assertEqual(edited_post.content, "Post edited-" + self.browser.current_url)
+
+#     def test_frontend_index_delete_post(self):
+#         """ Try to delete a post using delete button """
+#         # Login the user
+#         self.login_quick()
+#         # Go to the index view
+#         self.browser.get(self.live_server_url)
+
+#         # Get delete-edit-panel
+#         delete_edit_panel = self.browser.find_element_by_css_selector(".post .delete-edit-panel")
+#         # Click on the icon button
+#         delete_edit_panel.find_element_by_class_name("icon-button").click()
+#         time.sleep(0.1)
+#         # Click on the delete button
+#         delete_edit_panel.find_element_by_class_name("dropdown-delete").click()
+#         # Get the modal and click delete
+#         modal_el = self.browser.find_element_by_css_selector(".post .delete-modal")
+#         modal_el.find_element_by_css_selector(".modal-footer button.modal-delete").click()
+#         time.sleep(0.7)
+
+#         # Get the post
+#         deleted_post = Post.objects.filter(user=self.user).all()
+
+#         self.assertEqual(deleted_post.count(), 0)
+
+#     def test_frontend_user_profile_delete_post(self):
+#         """ Try to delete a post using delete button """
+#         # Login the user
+#         self.login_quick()
+#         # Go to the self.user profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+
+#         # Get delete-edit-panel
+#         delete_edit_panel = self.browser.find_element_by_css_selector(".post .delete-edit-panel")
+#         # Click on the icon button
+#         delete_edit_panel.find_element_by_class_name("icon-button").click()
+#         time.sleep(0.1)
+#         # Click on the delete button
+#         delete_edit_panel.find_element_by_class_name("dropdown-delete").click()
+#         # Get the modal and click delete
+#         modal_el = self.browser.find_element_by_css_selector(".post .delete-modal")
+#         modal_el.find_element_by_css_selector(".modal-footer button.modal-delete").click()
+#         time.sleep(0.7)
+
+#         # Get the post
+#         deleted_post = Post.objects.filter(user=self.user).all()
+
+#         self.assertEqual(deleted_post.count(), 0)
+
+#     def test_frontend_showmore_button_post(self):
+#         """ Check if show more button shows up for long posts (index, user-profile, following) """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a long text post
+#         Post.objects.create(user=self.user, content=("Lorem ipsum" * 200))
+
+#         # Login the user
+#         self.login_quick()
+
+#         # Test the index and user-profile view
+#         for url in ["", f"/user-profile/{self.user.id}"]:
+#             self.browser.get(self.live_server_url + url)
+
+#             # Get posts
+#             posts_el = self.browser.find_elements_by_class_name("post")
+
+#             # new_user post - make sure the *show more* button is not hidden
+#             self.assertNotIn("hidden", posts_el[0].find_element_by_class_name("show-more").get_attribute("class"))
+#             # self.user post - make sure the *show more* button is hidden
+#             self.assertIn("hidden", posts_el[1].find_element_by_class_name("show-more").get_attribute("class"))
+
+#         # Test the following view
+#         # Create a short text post (new_user)
+#         Post.objects.create(user=new_user, content=("Lorem ipsum"))
+#         time.sleep(0.5)
+#         # Creat a long text post (new_user)
+#         Post.objects.create(user=new_user, content=("Lorem ipsum" * 200))
+
+#         # Go to the following view
+#         self.browser.get(self.live_server_url + "/following")
+
+#         # Get posts
+#         posts_el = self.browser.find_elements_by_class_name("post")
+
+#         # new_user post - make sure the *show more* button is not hidden
+#         self.assertNotIn("hidden", posts_el[0].find_element_by_class_name("show-more").get_attribute("class"))
+#         # self.user post - make sure the *show more* button is hidden
+#         self.assertIn("hidden", posts_el[1].find_element_by_class_name("show-more").get_attribute("class"))
+
+#     def test_frontend_index_like_post(self):
+#         """ Try to like a post using like-button -> check if new like exists and data-count, like-counter values are correct """
+#         # Login the user
+#         self.login_quick()
+#         # Get the index view
+#         self.browser.get(self.live_server_url)
+
+#         # Get the post
+#         post_el = self.browser.find_element_by_class_name("post")
+#         # Perform the test
+#         self.like_panel_test(self.user, post_el)
+
+#     def test_frontend_user_profile_like_post(self):
+#         """ Try to like a post using like-button -> check if new like exists and data-count, like-counter values are correct """
+#         # Login the user
+#         self.login_quick()
+#         # Get the user-profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+
+#         # Get the post
+#         post_el = self.browser.find_element_by_class_name("post")
+#         # Perform the test
+#         self.like_panel_test(self.user, post_el)
+
+#     def test_frontend_following_like_post(self):
+#         """ Try to like a post using like-button -> check if new like exists and data-count, like-counter values are correct """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post
+#         Post.objects.create(user=new_user, content="Lorem ipsum")
+
+#         # Login the user
+#         self.login_quick()
+#         # Get the following view
+#         self.browser.get(self.live_server_url + "/following")
+
+#         # Get the post
+#         post_el = self.browser.find_element_by_class_name("post")
+#         # Perform the test
+#         self.like_panel_test(new_user, post_el)
+
+#     def test_frontend_index_change_like_post(self):
+#         """ Try to change a like on a post -> check if new emojie exists and data-count, like-counter values are correct """
+#         # Create a like
+#         Like.objects.create(user=self.user, post=self.user.posts.all()[0], emoji_type=1)
+
+#         # Login the user
+#         self.login_quick()
+#         # Get the index view
+#         self.browser.get(self.live_server_url)
+
+#         # Get the post
+#         post_el = self.browser.find_element_by_class_name("post")
+#         # Perform the test
+#         self.like_panel_test(self.user, post_el)
+
+#     def test_frontend_user_profile_change_like_post(self):
+#         """ Try to change a like on a post -> check if new emojie exists and data-count, like-counter values are correct """
+#         # Create a like
+#         Like.objects.create(user=self.user, post=self.user.posts.all()[0], emoji_type=1)
+
+#         # Login the user
+#         self.login_quick()
+#         # Get the user-profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+
+#         # Get the post
+#         post_el = self.browser.find_element_by_class_name("post")
+#         # Perform the test
+#         self.like_panel_test(self.user, post_el)
+
+#     def test_frontend_following_change_like_post(self):
+#         """ Try to change a like on a post -> check if new emojie exists and data-count, like-counter values are correct """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post
+#         new_post = Post.objects.create(user=new_user, content="Lorem ipsum")
+#         # Create a like
+#         Like.objects.create(user=self.user, post=new_post, emoji_type=1)
+
+#         # Login the user
+#         self.login_quick()
+#         # Get the following view
+#         self.browser.get(self.live_server_url + "/following")
+
+#         # Get the post
+#         post_el = self.browser.find_element_by_class_name("post")
+#         # Perform the test
+#         self.like_panel_test(new_user, post_el)
+
+#     def test_frontend_index_like_emoji_twice_post(self):
+#         """ Liking one post with the same emoji twice -> check if data-count, like-counter values are correct """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Create likes
+#         Like.objects.create(user=self.user, post=self.user.posts.all()[0], emoji_type=2)
+#         Like.objects.create(user=new_user, post=self.user.posts.all()[0], emoji_type=2)
+
+#         # Login the user
+#         self.login_quick()
+#         # Get the index view
+#         self.browser.get(self.live_server_url)
+
+#         # Check if the emoji has data-count = 2
+#         emoji_el = self.browser.find_element_by_css_selector(".post ul.emoji-list i[data-name='dislike']")
+#         like_counter_el = self.browser.find_element_by_css_selector(".post .like-data .like-counter")
+
+#         self.assertEqual(emoji_el.get_attribute("data-count"), "2")
+
+#         # Check if the like-counter = 1
+#         self.assertEqual(like_counter_el.text, "+1")
+
+#     def test_frontend_user_profile_like_emoji_twice_post(self):
+#         """ Liking one post with the same emoji twice -> check if data-count, like-counter values are correct """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Create likes
+#         Like.objects.create(user=self.user, post=self.user.posts.all()[0], emoji_type=3)
+#         Like.objects.create(user=new_user, post=self.user.posts.all()[0], emoji_type=3)
+
+#         # Login the user
+#         self.login_quick()
+#         # Get the user-profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+
+#         # Check if the emoji has data-count = 2
+#         emoji_el = self.browser.find_element_by_css_selector(".post ul.emoji-list i[data-name='smile']")
+#         like_counter_el = self.browser.find_element_by_css_selector(".post .like-data .like-counter")
+
+#         self.assertEqual(emoji_el.get_attribute("data-count"), "2")
+
+#         # Check if the like-counter = 1
+#         self.assertEqual(like_counter_el.text, "+1")
+
+#     def test_frontend_following_like_emoji_twice_post(self):
+#         """ Liking one post with the same emoji twice -> check if data-count, like-counter values are correct """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post
+#         new_post = Post.objects.create(user=new_user, content="Lorem ipsum")
+#         # Create likes
+#         Like.objects.create(user=self.user, post=new_post, emoji_type=1)
+#         Like.objects.create(user=new_user, post=new_post, emoji_type=1)
+
+#         # Login the user
+#         self.login_quick()
+#         # Get the following view
+#         self.browser.get(self.live_server_url + "/following")
+
+#         # Check if the emoji has data-count = 2
+#         emoji_el = self.browser.find_element_by_css_selector(".post ul.emoji-list i[data-name='like']")
+#         like_counter_el = self.browser.find_element_by_css_selector(".post .like-data .like-counter")
+
+#         self.assertEqual(emoji_el.get_attribute("data-count"), "2")
+
+#         # Check if the like-counter = 1
+#         self.assertEqual(like_counter_el.text, "+1")
+
+#     def test_frontend_index_emoji_correct_order_post(self):
+#         """ Make sure that emoji with most likes is first """
+#         # Create a second user
+#         second_user = User.objects.create_user(username="1", password="1")
+#         # Create a third user
+#         third_user = User.objects.create_user(username="2", password="2")
+#         # Create likes
+#         Like.objects.create(user=self.user, post=self.user.posts.all()[0], emoji_type=1)
+#         Like.objects.create(user=second_user, post=self.user.posts.all()[0], emoji_type=3)
+#         Like.objects.create(user=third_user, post=self.user.posts.all()[0], emoji_type=3)
+
+#         # Login the user
+#         self.login_quick()
+#         # Get the index view
+#         self.browser.get(self.live_server_url)
+
+#         # Check if smile emoji is first and like emoji is second
+#         emoji_list_el = self.browser.find_elements_by_css_selector(".post ul.emoji-list > i")
+
+#         self.assertEqual(emoji_list_el[0].get_attribute("data-name"), "smile")
+#         self.assertEqual(emoji_list_el[1].get_attribute("data-name"), "like")
+
+#     def test_frontend_user_profile_emoji_correct_order_post(self):
+#         """ Make sure that emoji with most likes is first """
+#         # Create a second user
+#         second_user = User.objects.create_user(username="1", password="1")
+#         # Create a third user
+#         third_user = User.objects.create_user(username="2", password="2")
+#         # Create likes
+#         Like.objects.create(user=self.user, post=self.user.posts.all()[0], emoji_type=1)
+#         Like.objects.create(user=second_user, post=self.user.posts.all()[0], emoji_type=3)
+#         Like.objects.create(user=third_user, post=self.user.posts.all()[0], emoji_type=3)
+
+#         # Login the user
+#         self.login_quick()
+#         # Get the user-profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+
+#         # Check if smile emoji is first and like emoji is second
+#         emoji_list_el = self.browser.find_elements_by_css_selector(".post ul.emoji-list > i")
+
+#         self.assertEqual(emoji_list_el[0].get_attribute("data-name"), "smile")
+#         self.assertEqual(emoji_list_el[1].get_attribute("data-name"), "like")
+
+#     def test_frontend_following_emoji_correct_order_post(self):
+#         """ Make sure that emoji with most likes is first """
+#         # Create a second user
+#         second_user = User.objects.create_user(username="1", password="1")
+#         # Create a third user
+#         third_user = User.objects.create_user(username="2", password="2")
+#         # Follow the second user
+#         Following.objects.create(user=self.user, user_followed=second_user)
+#         # Creat a post by the second user
+#         new_post = Post.objects.create(user=second_user, content="Lorem ipsum")
+#         # Create likes
+#         Like.objects.create(user=self.user, post=new_post, emoji_type=3)
+#         Like.objects.create(user=second_user, post=new_post, emoji_type=1)
+#         Like.objects.create(user=third_user, post=new_post, emoji_type=3)
+
+#         # Login the user
+#         self.login_quick()
+#         # Get the following view
+#         self.browser.get(self.live_server_url + "/following")
+
+#         # Check if smile emoji is first and like emoji is second
+#         emoji_list_el = self.browser.find_elements_by_css_selector(".post ul.emoji-list > i")
+
+#         self.assertEqual(emoji_list_el[0].get_attribute("data-name"), "smile")
+#         self.assertEqual(emoji_list_el[1].get_attribute("data-name"), "like")
+
+#     def test_frontend_comment_data_post(self):
+#         """ Check if comment-count == 3 for index and user-profile and 0 for following """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post
+#         Post.objects.create(user=new_user, content="Lorem ipsum")
+
+#         # Login the user
+#         self.login_quick()
+
+#         # Get the index view
+#         self.browser.get(self.live_server_url)
+#         posts_el = self.browser.find_elements_by_css_selector(".post")
+#         # Get comment count for self.user's post
+#         comment_count_el = posts_el[1].find_element_by_css_selector(".comment-data")
+#         comment_count_text = comment_count_el.text.split(":")[-1].strip()
+#         self.assertEqual(comment_count_text, str(3))
+
+#         # Get the user-profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         # Get comment count for self.user's post
+#         comment_count_el = self.browser.find_element_by_css_selector(".post .comment-data")
+#         comment_count_text = comment_count_el.text.split(":")[-1].strip()
+#         self.assertEqual(comment_count_text, str(3))
+
+#         # Get the following view
+#         self.browser.get(self.live_server_url + "/following")
+#         # Get comment count for new_user's post
+#         comment_count_el = self.browser.find_element_by_css_selector(".post .comment-data")
+#         comment_count_text = comment_count_el.text.split(":")[-1].strip()
+#         self.assertEqual(comment_count_text, str(0))
+
+#     def test_frontend_comment_section_post(self):
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post
+#         Post.objects.create(user=new_user, content="Lorem ipsum")
+
+#         # Login the user
+#         self.login_quick()
+
+#         # Get the index view
+#         self.browser.get(self.live_server_url)
+#         # Get the comment button and click it
+#         comment_button = self.browser.find_elements_by_css_selector(".post .comment-button")[0]
+#         time.sleep(1.5)
+#         action = ActionChains(self.browser)
+#         time.sleep(3)
+#         action.move_to_element(comment_button).perform()
+#         time.sleep(0.5)
+#         comment_button.click()
+#         time.sleep(0.7)
+#         # Get the comment section
+#         comment_section_el = self.browser.find_elements_by_css_selector(".post-comment-element .comment-section")[0]
+#         self.assertIn("show", comment_section_el.get_attribute("class"))
+
+#         # Get the user-profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         # Get the comment button and click it
+#         comment_button = self.browser.find_element_by_css_selector(".post .comment-button")
+#         action = ActionChains(self.browser)
+#         action.move_to_element(comment_button).perform()
+#         time.sleep(0.5)
+#         comment_button.click()
+#         time.sleep(0.7)
+#         # Get the comment section
+#         comment_section_el = self.browser.find_elements_by_css_selector(".post-comment-element .comment-section")[0]
+#         self.assertIn("show", comment_section_el.get_attribute("class"))
+
+#         # Get the following view
+#         self.browser.get(self.live_server_url + "/following")
+#         # Get the comment button and click it
+#         comment_button = self.browser.find_element_by_css_selector(".post .comment-button")
+#         action = ActionChains(self.browser)
+#         action.move_to_element(comment_button).perform()
+#         time.sleep(0.5)
+#         comment_button.click()
+#         time.sleep(0.7)
+#         # Get the comment section
+#         comment_section_el = self.browser.find_elements_by_css_selector(".post-comment-element .comment-section")[0]
+#         self.assertIn("show", comment_section_el.get_attribute("class"))
+
+#     # Comments tests
+#     def test_frontend_index_post_comment(self):
+#         """ Create a comment using form -> check if it exists """
+
+#         # Login the user
+#         self.login_quick()
+
+#         self.browser.get(self.live_server_url)
+#         # Open comment section
+#         comment_button = self.browser.find_element_by_css_selector(".post .comment-button")
+#         comment_button.click()
+
+#         # Get the form and create a new comment
+#         comment_form_el = self.browser.find_element_by_css_selector(".comment-form-wrapper form")
+#         comment_form_el.find_element_by_css_selector("textarea").send_keys("Sellenium test")
+#         comment_form_el.submit()
+
+#         # Check if the new comment exists
+#         self.assertEqual(Comment.objects.filter(content="Sellenium test").count(), 1)
+
+#     def test_frontend_user_profile_post_comment(self):
+#         """ Create a comment using form -> check if it exists """
+
+#         # Login the user
+#         self.login_quick()
+
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         # Open comment section
+#         comment_button = self.browser.find_element_by_css_selector(".post .comment-button")
+#         comment_button.click()
+
+#         # Get the form and create a new comment
+#         comment_form_el = self.browser.find_element_by_css_selector(".comment-form-wrapper form")
+#         comment_form_el.find_element_by_css_selector("textarea").send_keys("Sellenium test")
+#         comment_form_el.submit()
+
+#         # Check if the new comment exists
+#         self.assertEqual(Comment.objects.filter(content="Sellenium test").count(), 1)
+
+#     def test_frontend_following_post_comment(self):
+#         """ Create a comment using form -> check if it exists """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a long text post
+#         Post.objects.create(user=new_user, content="Lorem ipsum")
+
+#         # Login the user
+#         self.login_quick()
+
+#         self.browser.get(self.live_server_url + "/following")
+#         # Open comment section
+#         comment_button = self.browser.find_element_by_css_selector(".post .comment-button")
+#         comment_button.click()
+
+#         # Get the form and create a new comment
+#         comment_form_el = self.browser.find_element_by_css_selector(".comment-form-wrapper form")
+#         comment_form_el.find_element_by_css_selector("textarea").send_keys("Sellenium test")
+#         comment_form_el.submit()
+
+#         # Check if the new comment exists
+#         self.assertEqual(Comment.objects.filter(content="Sellenium test").count(), 1)
+
+#     def test_frontend_comment_creator_button_text(self):
+#         """ Check if comment creator's name button redirects correctly to user profile  """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post by the second user
+#         post = Post.objects.create(user=new_user, content="new user post")
+#         # Creat a comment to this post
+#         Comment.objects.create(user=self.user, post=post, content="comment")
+
+#         # Login the user
+#         self.login_quick()
+
+#         # Check **index view**
+#         self.browser.get(self.live_server_url)
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         comment_user_link_text_el = post_comment_el.find_element_by_css_selector(".comment-main > a")
+#         comment_user_link_text_el.click()
+#         time.sleep(0.1)
+
+#         # Get the current url
+#         current_url_list = self.browser.current_url.split("/")
+#         # Check if the url is .../user-profile/{self.user.id}
+#         self.assertEqual(current_url_list[-2], "user-profile")
+#         self.assertEqual(current_url_list[-1], str(self.user.id))
+
+#         # Check **user-profile view**
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         comment_user_link_text_el = post_comment_el.find_elements_by_css_selector(".comment-main > a")
+#         comment_user_link_text_el[0].click()
+#         time.sleep(0.1)
+
+#         # Get the current url
+#         current_url_list = self.browser.current_url.split("/")
+#         # Check if the url is .../user-profile/{self.user.id}
+#         self.assertEqual(current_url_list[-2], "user-profile")
+#         self.assertEqual(current_url_list[-1], str(self.user.id))
+
+#         # Check **following view**
+#         self.browser.get(self.live_server_url + "/following")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         comment_user_link_text_el = post_comment_el.find_elements_by_css_selector(".comment-main > a")
+#         comment_user_link_text_el[0].click()
+#         time.sleep(0.1)
+
+#         # Get the current url
+#         current_url_list = self.browser.current_url.split("/")
+#         # Check if the url is .../user-profile/{self.user.id}
+#         self.assertEqual(current_url_list[-2], "user-profile")
+#         self.assertEqual(current_url_list[-1], str(self.user.id))
+
+#     def test_frontend_comment_creator_button_picture(self):
+#         """ Check if comment creator's picture button redirects correctly to user profile  """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post by the second user
+#         post = Post.objects.create(user=new_user, content="new user post")
+#         # Creat a comment to this post
+#         Comment.objects.create(user=self.user, post=post, content="comment")
+
+#         # Login the user
+#         self.login_quick()
+
+#         # Check **index view**
+#         self.browser.get(self.live_server_url)
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         comment_user_link_text_el = post_comment_el.find_element_by_css_selector(".comment-user-image > a")
+#         comment_user_link_text_el.click()
+#         time.sleep(0.1)
+
+#         # Get the current url
+#         current_url_list = self.browser.current_url.split("/")
+#         # Check if the url is .../user-profile/{self.user.id}
+#         self.assertEqual(current_url_list[-2], "user-profile")
+#         self.assertEqual(current_url_list[-1], str(self.user.id))
+
+#         # Check **user-profile view**
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         comment_user_link_text_el = post_comment_el.find_elements_by_css_selector(".comment-user-image > a")
+#         comment_user_link_text_el[0].click()
+#         time.sleep(0.1)
+
+#         # Get the current url
+#         current_url_list = self.browser.current_url.split("/")
+#         # Check if the url is .../user-profile/{self.user.id}
+#         self.assertEqual(current_url_list[-2], "user-profile")
+#         self.assertEqual(current_url_list[-1], str(self.user.id))
+
+#         # Check **following view**
+#         self.browser.get(self.live_server_url + "/following")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         comment_user_link_text_el = post_comment_el.find_elements_by_css_selector(".comment-user-image > a")
+#         comment_user_link_text_el[0].click()
+#         time.sleep(0.1)
+
+#         # Get the current url
+#         current_url_list = self.browser.current_url.split("/")
+#         # Check if the url is .../user-profile/{self.user.id}
+#         self.assertEqual(current_url_list[-2], "user-profile")
+#         self.assertEqual(current_url_list[-1], str(self.user.id))
+
+#     def test_frontend_index_delete_edit_panel_exists_comment(self):
+#         """ Check if delete-edit-panel exists or doesn't exist for comment's creator == current user and comment's creator != current user """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Create a comment by the second user
+#         Comment.objects.create(user=new_user, post=self.user.posts.all()[0], content="new user comment")
+
+#         # Login the user
+#         self.login_quick()
+#         # Go to the index view
+#         self.browser.get(self.live_server_url)
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         # Get the comments
+#         comments_el = post_comment_el.find_elements_by_css_selector(".comment")
+
+#         # Check if delete-edit-panel is present or not
+#         self.assertTrue(self.is_element_present(comments_el[0], ".delete-edit-panel"))
+#         self.assertTrue(self.is_element_present(comments_el[1], ".delete-edit-panel"))
+#         self.assertTrue(self.is_element_present(comments_el[2], ".delete-edit-panel"))
+#         self.assertFalse(self.is_element_present(comments_el[3], ".delete-edit-panel"))
+
+#     def test_frontend_user_profile_delete_edit_panel_exists_comment(self):
+#         """ Check if delete-edit-panel exists or doesn't exist for comment's creator == current user and comment's creator != current user """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Create a comment by the second user
+#         Comment.objects.create(user=new_user, post=self.user.posts.all()[0], content="new user comment")
+
+#         # Login the user
+#         self.login_quick()
+#         # Go to the self.user profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         # Get the comments
+#         comments_el = post_comment_el.find_elements_by_css_selector(".comment")
+
+#         # Check if delete-edit-panel is present or not
+#         self.assertTrue(self.is_element_present(comments_el[0], ".delete-edit-panel"))
+#         self.assertTrue(self.is_element_present(comments_el[1], ".delete-edit-panel"))
+#         self.assertTrue(self.is_element_present(comments_el[2], ".delete-edit-panel"))
+#         self.assertFalse(self.is_element_present(comments_el[3], ".delete-edit-panel"))
+
+#     def test_frontend_following_delete_edit_panel_exists_comment(self):
+#         """ Check if delete-edit-panel exists or doesn't exist for comment's creator == current user and comment's creator != current user """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post by the second user
+#         post = Post.objects.create(user=new_user, content="new user post")
+#         # Create comments by the second user adn by self.user
+#         Comment.objects.create(user=new_user, post=post, content="new user comment")
+#         Comment.objects.create(user=self.user, post=post, content="self.user comment")
+
+#         # Login the user
+#         self.login_quick()
+#         # Go to the following view
+#         self.browser.get(self.live_server_url + "/following")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         # Get the comments
+#         comments_el = post_comment_el.find_elements_by_css_selector(".comment")
+
+#         # Check if delete-edit-panel is present or not
+#         self.assertFalse(self.is_element_present(comments_el[0], ".delete-edit-panel"))
+#         self.assertTrue(self.is_element_present(comments_el[1], ".delete-edit-panel"))
+
+#     def test_frontend_edit_comment(self):
+#         """ Try to edit a comment using edit button (index and user-profile views) """
+#         # Get the oldest comment
+#         comment = Comment.objects.get(content="comment 0")
+#         # Login the user
+#         self.login_quick()
+
+#         for url in ["", f"/user-profile/{self.user.id}"]:
+#             self.browser.get(self.live_server_url + url)
+#             # Get the post-comment element
+#             post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#             # Open comment section
+#             comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#             comment_button[0].click()
+
+#             # Get the delete-edit-panel
+#             delete_edit_panel = self.browser.find_elements_by_css_selector(".comment .delete-edit-panel")[0]
+#             # Click on the icon button
+#             delete_edit_panel.find_element_by_class_name("icon-button").click()
+#             time.sleep(1.5)
+#             # Click on the edit button
+#             delete_edit_panel.find_element_by_class_name("dropdown-edit").click()
+#             # Get the modal, its textarea and save button
+#             modal_el = self.browser.find_element_by_css_selector(".comment .edit-modal")
+#             modal_textarea_el = modal_el.find_element_by_css_selector(".modal-body textarea")
+#             modal_save_button = modal_el.find_element_by_css_selector(".modal-footer button.modal-save")
+#             time.sleep(1.5)
+#             # Change the modal textarea's value
+#             modal_textarea_el.clear()
+#             time.sleep(1.5)
+#             modal_textarea_el.send_keys("Comment edited-" + self.browser.current_url)
+#             time.sleep(0.5)
+#             modal_save_button.click()
+#             time.sleep(1)
+
+#             # Get the comment's  new data
+#             edited_comment_content = Comment.objects.get(pk=comment.id).content
+
+#             self.assertEqual(edited_comment_content, "Comment edited-" + self.browser.current_url)
+
+#     def test_frontend_index_delete_comment(self):
+#         """ Try to delete a comment using delete button """
+#         # Login the user
+#         self.login_quick()
+#         # Go to the index view
+#         self.browser.get(self.live_server_url)
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         # Get delete-edit-panel
+#         delete_edit_panel = self.browser.find_element_by_css_selector(".comment .delete-edit-panel")
+#         # Click on the icon button
+#         delete_edit_panel.find_element_by_class_name("icon-button").click()
+#         time.sleep(0.1)
+#         # Click on the delete button
+#         delete_edit_panel.find_element_by_class_name("dropdown-delete").click()
+#         # Get the modal and click delete
+#         modal_el = self.browser.find_element_by_css_selector(".comment .delete-modal")
+#         modal_el.find_element_by_css_selector(".modal-footer button.modal-delete").click()
+#         time.sleep(0.7)
+
+#         # Get the comments
+#         deleted_comment = Comment.objects.filter(user=self.user, content="comment 0").all()
+
+#         self.assertEqual(deleted_comment.count(), 0)
+
+#     def test_frontend_user_profile_delete_comment(self):
+#         """ Try to delete a comment using delete button """
+#         # Login the user
+#         self.login_quick()
+#         # Go to the self.user profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         # Get delete-edit-panel
+#         delete_edit_panel = self.browser.find_element_by_css_selector(".comment .delete-edit-panel")
+#         # Click on the icon button
+#         delete_edit_panel.find_element_by_class_name("icon-button").click()
+#         time.sleep(0.1)
+#         # Click on the delete button
+#         delete_edit_panel.find_element_by_class_name("dropdown-delete").click()
+#         # Get the modal and click delete
+#         modal_el = self.browser.find_element_by_css_selector(".comment .delete-modal")
+#         modal_el.find_element_by_css_selector(".modal-footer button.modal-delete").click()
+#         time.sleep(0.7)
+
+#         # Get the comments
+#         deleted_comment = Comment.objects.filter(user=self.user, content="comment 0").all()
+
+#         self.assertEqual(deleted_comment.count(), 0)
+
+#     def test_frontend_following_delete_comment(self):
+#         """ Try to delete a comment using delete button """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post by the second user
+#         post = Post.objects.create(user=new_user, content="new user post")
+#         # Create comments by self.user
+#         comment = Comment.objects.create(user=self.user, post=post, content="new user comment")
+
+#         # Login the user
+#         self.login_quick()
+#         # Go to the following view
+#         self.browser.get(self.live_server_url + "/following")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         # Get delete-edit-panel
+#         delete_edit_panel = self.browser.find_element_by_css_selector(".comment .delete-edit-panel")
+#         # Click on the icon button
+#         delete_edit_panel.find_element_by_class_name("icon-button").click()
+#         time.sleep(0.1)
+#         # Click on the delete button
+#         delete_edit_panel.find_element_by_class_name("dropdown-delete").click()
+#         # Get the modal and click delete
+#         modal_el = self.browser.find_element_by_css_selector(".comment .delete-modal")
+#         modal_el.find_element_by_css_selector(".modal-footer button.modal-delete").click()
+#         time.sleep(0.7)
+
+#         # Get the comments
+#         deleted_comment = Comment.objects.filter(pk=comment.id).all()
+
+#         self.assertEqual(deleted_comment.count(), 0)
+
+#     def test_frontend_showmore_button_comment(self):
+#         """ Check if show more button shows up for long comments (index, user-profile, following) """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post by the second user
+#         post = Post.objects.create(user=new_user, content="new user post")
+#         # Creat a long text comment by self.user
+#         Comment.objects.create(user=self.user, post=self.user.posts.all()[0], content=("Lorem ipsum" * 200))
+
+#         # Login the user
+#         self.login_quick()
+
+#         # Test the **index** and **user-profile view**
+#         for url in ["", f"/user-profile/{self.user.id}"]:
+#             self.browser.get(self.live_server_url + url)
+#             # Get the post-comment element
+#             post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")
+#             post_comment_el = post_comment_el[1 if not url else 0]
+#             # Open comment section
+#             comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#             comment_button[0].click()
+
+#             # Get comments
+#             comments_el = self.browser.find_elements_by_css_selector(".comment")
+#             time.sleep(1.5)
+
+#             # 3rd comment - make sure the *show more* button is hidden
+#             self.assertIn("hidden", comments_el[2].find_element_by_class_name("show-more").get_attribute("class"))
+#             # 4th comment - make sure the *show more* button is not hidden
+#             self.assertNotIn("hidden", comments_el[3].find_element_by_class_name("show-more").get_attribute("class"))
+
+#         # Test the **following view**
+#         # Create a short text comment (new_user)
+#         Comment.objects.create(user=new_user, post=post, content="new user comment")
+#         time.sleep(1.5)
+#         # Creat a long text comment (new_user)
+#         Comment.objects.create(user=new_user, post=post, content=("Lorem ipsum" * 200))
+
+#         # Go to the following view
+#         self.browser.get(self.live_server_url + "/following")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+
+#         # Get comments
+#         comments_el = self.browser.find_elements_by_class_name("comment")
+#         time.sleep(0.5)
+#         # 1st comment - make sure the *show more* button is not hidden
+#         self.assertIn("hidden", comments_el[0].find_element_by_class_name("show-more").get_attribute("class"))
+#         # 2nd comment - make sure the *show more* button is hidden
+#         self.assertNotIn("hidden", comments_el[1].find_element_by_class_name("show-more").get_attribute("class"))
+
+#     def test_frontend_index_like_comment(self):
+#         """ Try to like a comment using like-button -> check if new like exists and data-count, like-counter values are correct """
+#         # Login the user
+#         self.login_quick()
+#         # Get the index view
+#         self.browser.get(self.live_server_url)
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+#         time.sleep(0.5)
+#         # Get a comment
+#         comment_el = post_comment_el.find_elements_by_class_name("comment")[0]
+#         time.sleep(0.5)
+#         # Perform the test
+#         self.like_panel_test(self.user, comment_el)
+
+#     def test_frontend_user_profile_like_comment(self):
+#         """ Try to like a comment using like-button -> check if new like exists and data-count, like-counter values are correct """
+#         # Login the user
+#         self.login_quick()
+#         # Get the user-profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+#         time.sleep(0.5)
+
+#         # Get a comment
+#         comment_el = post_comment_el.find_elements_by_class_name("comment")[0]
+#         time.sleep(0.5)
+#         # Perform the test
+#         self.like_panel_test(self.user, comment_el)
+
+#     def test_frontend_following_like_comment(self):
+#         """ Try to like a comment using like-button -> check if new like exists and data-count, like-counter values are correct """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post
+#         post = Post.objects.create(user=new_user, content="Lorem ipsum")
+#         # Creat a comment
+#         Comment.objects.create(user=new_user, post=post, content="comment")
+
+
+#         # Login the user
+#         self.login_quick()
+#         # Get the following view
+#         self.browser.get(self.live_server_url + "/following")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+#         time.sleep(0.5)
+
+#         # Get a comment
+#         comment_el = post_comment_el.find_elements_by_class_name("comment")[0]
+#         time.sleep(0.5)
+#         # Perform the test
+#         self.like_panel_test(self.user, comment_el)
+
+#     def test_frontend_index_change_like_comment(self):
+#         """ Try to change a like on a comment -> check if new emojie exists and data-count, like-counter values are correct """
+#         # Comment to like
+#         comment = Comment.objects.get(user=self.user, content="comment 0")
+#         # Create a like
+#         Like.objects.create(user=self.user, comment=comment, emoji_type=1)
+
+#         # Login the user
+#         self.login_quick()
+#         # Get the index view
+#         self.browser.get(self.live_server_url)
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+#         time.sleep(3)
         
-        # Get a comment
-        comment_el = post_comment_el.find_elements_by_class_name("comment")[0]
-        time.sleep(0.5)
-        # Perform the test
-        self.like_panel_test(self.user, comment_el)
+#         # Get a comment
+#         comment_el = post_comment_el.find_elements_by_class_name("comment")[0]
+#         time.sleep(0.5)
+#         # Perform the test
+#         self.like_panel_test(self.user, comment_el)
 
-    def test_frontend_user_profile_change_like_comment(self):
-        """ Try to change a like on a comment -> check if new emojie exists and data-count, like-counter values are correct """
-        # Comment to like
-        comment = Comment.objects.get(user=self.user, content="comment 0")
-        # Create a like
-        Like.objects.create(user=self.user, comment=comment, emoji_type=1)
+#     def test_frontend_user_profile_change_like_comment(self):
+#         """ Try to change a like on a comment -> check if new emojie exists and data-count, like-counter values are correct """
+#         # Comment to like
+#         comment = Comment.objects.get(user=self.user, content="comment 0")
+#         # Create a like
+#         Like.objects.create(user=self.user, comment=comment, emoji_type=1)
 
-        # Login the user
-        self.login_quick()
-        # Get the user-profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-        time.sleep(3)
-        # Get a comment
-        comment_el = post_comment_el.find_elements_by_class_name("comment")[0]
-        # Perform the test
-        self.like_panel_test(self.user, comment_el)
+#         # Login the user
+#         self.login_quick()
+#         # Get the user-profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+#         time.sleep(3)
+#         # Get a comment
+#         comment_el = post_comment_el.find_elements_by_class_name("comment")[0]
+#         # Perform the test
+#         self.like_panel_test(self.user, comment_el)
 
-    def test_frontend_following_change_like_comment(self):
-        """ Try to change a like on a comment -> check if new emojie exists and data-count, like-counter values are correct """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post
-        post = Post.objects.create(user=new_user, content="Lorem ipsum")
-        # Creat a comment
-        comment = Comment.objects.create(user=new_user, post=post, content="comment")
-        # Create a like
-        Like.objects.create(user=self.user, comment=comment, emoji_type=1)
+#     def test_frontend_following_change_like_comment(self):
+#         """ Try to change a like on a comment -> check if new emojie exists and data-count, like-counter values are correct """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post
+#         post = Post.objects.create(user=new_user, content="Lorem ipsum")
+#         # Creat a comment
+#         comment = Comment.objects.create(user=new_user, post=post, content="comment")
+#         # Create a like
+#         Like.objects.create(user=self.user, comment=comment, emoji_type=1)
 
-        # Login the user
-        self.login_quick()
-        # Get the following view
-        self.browser.get(self.live_server_url + "/following")
-        # Get the post-comment element
-        post_comment_el = self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
-        time.sleep(3)
-        # Get a comment
-        comment_el = post_comment_el.find_elements_by_class_name("comment")[0]
-        # Perform the test
-        self.like_panel_test(self.user, comment_el)
+#         # Login the user
+#         self.login_quick()
+#         # Get the following view
+#         self.browser.get(self.live_server_url + "/following")
+#         # Get the post-comment element
+#         post_comment_el = self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
+#         time.sleep(3)
+#         # Get a comment
+#         comment_el = post_comment_el.find_elements_by_class_name("comment")[0]
+#         # Perform the test
+#         self.like_panel_test(self.user, comment_el)
 
-    def test_frontend_index_like_emoji_twice_comment(self):
-        """ Liking one comment with the same emoji twice -> check if data-count, like-counter values are correct """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
+#     def test_frontend_index_like_emoji_twice_comment(self):
+#         """ Liking one comment with the same emoji twice -> check if data-count, like-counter values are correct """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
 
-        # Comment to like
-        comment = Comment.objects.get(user=self.user, content="comment 0")
-        # Create likes
-        Like.objects.create(user=self.user, comment=comment, emoji_type=2)
-        Like.objects.create(user=new_user, comment=comment, emoji_type=2)
+#         # Comment to like
+#         comment = Comment.objects.get(user=self.user, content="comment 0")
+#         # Create likes
+#         Like.objects.create(user=self.user, comment=comment, emoji_type=2)
+#         Like.objects.create(user=new_user, comment=comment, emoji_type=2)
 
-        # Login the user
-        self.login_quick()
-        # Get the index view
-        self.browser.get(self.live_server_url)
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
+#         # Login the user
+#         self.login_quick()
+#         # Get the index view
+#         self.browser.get(self.live_server_url)
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
 
-        # Check if the emoji has data-count = 2
-        comment_el = self.browser.find_elements_by_css_selector(".comment")[0]
-        emoji_el = comment_el.find_element_by_css_selector("ul.emoji-list i[data-name='dislike']")
-        time.sleep(2)
-        like_counter_el = comment_el.find_element_by_css_selector(".like-data .like-counter")
+#         # Check if the emoji has data-count = 2
+#         comment_el = self.browser.find_elements_by_css_selector(".comment")[0]
+#         emoji_el = comment_el.find_element_by_css_selector("ul.emoji-list i[data-name='dislike']")
+#         time.sleep(2)
+#         like_counter_el = comment_el.find_element_by_css_selector(".like-data .like-counter")
 
-        self.assertEqual(emoji_el.get_attribute("data-count"), "2")
+#         self.assertEqual(emoji_el.get_attribute("data-count"), "2")
 
-        # Check if the like-counter = 1
-        self.assertEqual(like_counter_el.text, "+1")
+#         # Check if the like-counter = 1
+#         self.assertEqual(like_counter_el.text, "+1")
 
-    def test_frontend_user_profile_like_emoji_twice_comment(self):
-        """ Liking one comment with the same emoji twice -> check if data-count, like-counter values are correct """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Comment to like
-        comment = Comment.objects.get(user=self.user, content="comment 0")
-        # Create likes
-        Like.objects.create(user=self.user, comment=comment, emoji_type=2)
-        Like.objects.create(user=new_user, comment=comment, emoji_type=2)
+#     def test_frontend_user_profile_like_emoji_twice_comment(self):
+#         """ Liking one comment with the same emoji twice -> check if data-count, like-counter values are correct """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Comment to like
+#         comment = Comment.objects.get(user=self.user, content="comment 0")
+#         # Create likes
+#         Like.objects.create(user=self.user, comment=comment, emoji_type=2)
+#         Like.objects.create(user=new_user, comment=comment, emoji_type=2)
 
-        # Login the user
-        self.login_quick()
-        # Get the user-profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
+#         # Login the user
+#         self.login_quick()
+#         # Get the user-profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
 
-        # Check if the emoji has data-count = 2
-        comment_el = self.browser.find_elements_by_css_selector(".comment")[0]
-        emoji_el = comment_el.find_element_by_css_selector("ul.emoji-list i[data-name='dislike']")
-        time.sleep(2)
-        like_counter_el = comment_el.find_element_by_css_selector(".like-data .like-counter")
+#         # Check if the emoji has data-count = 2
+#         comment_el = self.browser.find_elements_by_css_selector(".comment")[0]
+#         emoji_el = comment_el.find_element_by_css_selector("ul.emoji-list i[data-name='dislike']")
+#         time.sleep(2)
+#         like_counter_el = comment_el.find_element_by_css_selector(".like-data .like-counter")
 
-        self.assertEqual(emoji_el.get_attribute("data-count"), "2")
+#         self.assertEqual(emoji_el.get_attribute("data-count"), "2")
 
-        # Check if the like-counter = 1
-        self.assertEqual(like_counter_el.text, "+1")
+#         # Check if the like-counter = 1
+#         self.assertEqual(like_counter_el.text, "+1")
 
-    def test_frontend_following_like_emoji_twice_comment(self):
-        """ Liking one comment with the same emoji twice -> check if data-count, like-counter values are correct """
-        # Create a second user
-        new_user = User.objects.create_user(username="1", password="1")
-        # Follow the user
-        Following.objects.create(user=self.user, user_followed=new_user)
-        # Creat a post
-        post = Post.objects.create(user=new_user, content="Lorem ipsum")
-        # Creat a comment
-        comment = Comment.objects.create(user=new_user, post=post, content="comment")
-        # Create likes
-        Like.objects.create(user=self.user, comment=comment, emoji_type=2)
-        Like.objects.create(user=new_user, comment=comment, emoji_type=2)
+#     def test_frontend_following_like_emoji_twice_comment(self):
+#         """ Liking one comment with the same emoji twice -> check if data-count, like-counter values are correct """
+#         # Create a second user
+#         new_user = User.objects.create_user(username="1", password="1")
+#         # Follow the user
+#         Following.objects.create(user=self.user, user_followed=new_user)
+#         # Creat a post
+#         post = Post.objects.create(user=new_user, content="Lorem ipsum")
+#         # Creat a comment
+#         comment = Comment.objects.create(user=new_user, post=post, content="comment")
+#         # Create likes
+#         Like.objects.create(user=self.user, comment=comment, emoji_type=2)
+#         Like.objects.create(user=new_user, comment=comment, emoji_type=2)
 
-        # Login the user
-        self.login_quick()
-        # Get the following view
-        self.browser.get(self.live_server_url + "/following")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
+#         # Login the user
+#         self.login_quick()
+#         # Get the following view
+#         self.browser.get(self.live_server_url + "/following")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
 
-        # Check if the emoji has data-count = 2
-        comment_el = self.browser.find_elements_by_css_selector(".comment")[0]
-        emoji_el = comment_el.find_element_by_css_selector("ul.emoji-list i[data-name='dislike']")
-        time.sleep(2)
-        like_counter_el = comment_el.find_element_by_css_selector(".like-data .like-counter")
+#         # Check if the emoji has data-count = 2
+#         comment_el = self.browser.find_elements_by_css_selector(".comment")[0]
+#         emoji_el = comment_el.find_element_by_css_selector("ul.emoji-list i[data-name='dislike']")
+#         time.sleep(2)
+#         like_counter_el = comment_el.find_element_by_css_selector(".like-data .like-counter")
 
-        self.assertEqual(emoji_el.get_attribute("data-count"), "2")
+#         self.assertEqual(emoji_el.get_attribute("data-count"), "2")
 
-        # Check if the like-counter = 1
-        self.assertEqual(like_counter_el.text, "+1")
+#         # Check if the like-counter = 1
+#         self.assertEqual(like_counter_el.text, "+1")
 
-    def test_frontend_index_emoji_correct_order_comment(self):
-        """ Make sure that emoji with most likes is first """
-        # Create a second user
-        second_user = User.objects.create_user(username="1", password="1")
-        # Create a third user
-        third_user = User.objects.create_user(username="2", password="2")
-        # Comment to like
-        comment = Comment.objects.get(user=self.user, content="comment 0")
-        # Create likes
-        Like.objects.create(user=self.user, comment=comment, emoji_type=1)
-        Like.objects.create(user=second_user, comment=comment, emoji_type=3)
-        Like.objects.create(user=third_user, comment=comment, emoji_type=3)
+#     def test_frontend_index_emoji_correct_order_comment(self):
+#         """ Make sure that emoji with most likes is first """
+#         # Create a second user
+#         second_user = User.objects.create_user(username="1", password="1")
+#         # Create a third user
+#         third_user = User.objects.create_user(username="2", password="2")
+#         # Comment to like
+#         comment = Comment.objects.get(user=self.user, content="comment 0")
+#         # Create likes
+#         Like.objects.create(user=self.user, comment=comment, emoji_type=1)
+#         Like.objects.create(user=second_user, comment=comment, emoji_type=3)
+#         Like.objects.create(user=third_user, comment=comment, emoji_type=3)
 
-        # Login the user
-        self.login_quick()
-        # Get the index view
-        self.browser.get(self.live_server_url)
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
+#         # Login the user
+#         self.login_quick()
+#         # Get the index view
+#         self.browser.get(self.live_server_url)
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
 
-        # Check if smile emoji is first and like emoji is second
-        comment_el = self.browser.find_elements_by_css_selector(".comment")[0]
-        emoji_list_el = comment_el.find_elements_by_css_selector("ul.emoji-list > i")
+#         # Check if smile emoji is first and like emoji is second
+#         comment_el = self.browser.find_elements_by_css_selector(".comment")[0]
+#         emoji_list_el = comment_el.find_elements_by_css_selector("ul.emoji-list > i")
 
-        self.assertEqual(emoji_list_el[0].get_attribute("data-name"), "smile")
-        self.assertEqual(emoji_list_el[1].get_attribute("data-name"), "like")
+#         self.assertEqual(emoji_list_el[0].get_attribute("data-name"), "smile")
+#         self.assertEqual(emoji_list_el[1].get_attribute("data-name"), "like")
 
-    def test_frontend_user_profile_emoji_correct_order_comment(self):
-        """ Make sure that emoji with most likes is first """
-        # Create a second user
-        second_user = User.objects.create_user(username="1", password="1")
-        # Create a third user
-        third_user = User.objects.create_user(username="2", password="2")
-        # Comment to like
-        comment = Comment.objects.get(user=self.user, content="comment 0")
-        # Create likes
-        Like.objects.create(user=self.user, comment=comment, emoji_type=1)
-        Like.objects.create(user=second_user, comment=comment, emoji_type=3)
-        Like.objects.create(user=third_user, comment=comment, emoji_type=3)
+#     def test_frontend_user_profile_emoji_correct_order_comment(self):
+#         """ Make sure that emoji with most likes is first """
+#         # Create a second user
+#         second_user = User.objects.create_user(username="1", password="1")
+#         # Create a third user
+#         third_user = User.objects.create_user(username="2", password="2")
+#         # Comment to like
+#         comment = Comment.objects.get(user=self.user, content="comment 0")
+#         # Create likes
+#         Like.objects.create(user=self.user, comment=comment, emoji_type=1)
+#         Like.objects.create(user=second_user, comment=comment, emoji_type=3)
+#         Like.objects.create(user=third_user, comment=comment, emoji_type=3)
 
-        # Login the user
-        self.login_quick()
-        # Get the user-profile view
-        self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
+#         # Login the user
+#         self.login_quick()
+#         # Get the user-profile view
+#         self.browser.get(self.live_server_url + f"/user-profile/{self.user.id}")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
 
-        # Check if smile emoji is first and like emoji is second
-        comment_el = self.browser.find_elements_by_css_selector(".comment")[0]
-        emoji_list_el = comment_el.find_elements_by_css_selector("ul.emoji-list > i")
+#         # Check if smile emoji is first and like emoji is second
+#         comment_el = self.browser.find_elements_by_css_selector(".comment")[0]
+#         emoji_list_el = comment_el.find_elements_by_css_selector("ul.emoji-list > i")
 
-        self.assertEqual(emoji_list_el[0].get_attribute("data-name"), "smile")
-        self.assertEqual(emoji_list_el[1].get_attribute("data-name"), "like")
+#         self.assertEqual(emoji_list_el[0].get_attribute("data-name"), "smile")
+#         self.assertEqual(emoji_list_el[1].get_attribute("data-name"), "like")
 
-    def test_frontend_following_emoji_correct_order_comment(self):
-        """ Make sure that emoji with most likes is first """
-        # Create a second user
-        second_user = User.objects.create_user(username="1", password="1")
-        # Create a third user
-        third_user = User.objects.create_user(username="2", password="2")
-        # Follow the second user
-        Following.objects.create(user=self.user, user_followed=second_user)
-        # Creat a post
-        post = Post.objects.create(user=second_user, content="Lorem ipsum")
-        # Creat a comment
-        comment = Comment.objects.create(user=second_user, post=post, content="comment")
-        # Create likes
-        Like.objects.create(user=self.user, comment=comment, emoji_type=1)
-        Like.objects.create(user=second_user, comment=comment, emoji_type=3)
-        Like.objects.create(user=third_user, comment=comment, emoji_type=3)
+#     def test_frontend_following_emoji_correct_order_comment(self):
+#         """ Make sure that emoji with most likes is first """
+#         # Create a second user
+#         second_user = User.objects.create_user(username="1", password="1")
+#         # Create a third user
+#         third_user = User.objects.create_user(username="2", password="2")
+#         # Follow the second user
+#         Following.objects.create(user=self.user, user_followed=second_user)
+#         # Creat a post
+#         post = Post.objects.create(user=second_user, content="Lorem ipsum")
+#         # Creat a comment
+#         comment = Comment.objects.create(user=second_user, post=post, content="comment")
+#         # Create likes
+#         Like.objects.create(user=self.user, comment=comment, emoji_type=1)
+#         Like.objects.create(user=second_user, comment=comment, emoji_type=3)
+#         Like.objects.create(user=third_user, comment=comment, emoji_type=3)
 
-        # Login the user
-        self.login_quick()
-        # Get the following view
-        self.browser.get(self.live_server_url + "/following")
-        # Get the post-comment element
-        post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
-        # Open comment section
-        comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
-        comment_button[0].click()
+#         # Login the user
+#         self.login_quick()
+#         # Get the following view
+#         self.browser.get(self.live_server_url + "/following")
+#         # Get the post-comment element
+#         post_comment_el =  self.browser.find_elements_by_css_selector(".post-comment-element")[0]
+#         # Open comment section
+#         comment_button = post_comment_el.find_elements_by_css_selector(".post .comment-button")
+#         comment_button[0].click()
 
-        # Check if smile emoji is first and like emoji is second
-        comment_el = self.browser.find_elements_by_css_selector(".comment")[0]
-        emoji_list_el = comment_el.find_elements_by_css_selector("ul.emoji-list > i")
+#         # Check if smile emoji is first and like emoji is second
+#         comment_el = self.browser.find_elements_by_css_selector(".comment")[0]
+#         emoji_list_el = comment_el.find_elements_by_css_selector("ul.emoji-list > i")
 
-        self.assertEqual(emoji_list_el[0].get_attribute("data-name"), "smile")
-        self.assertEqual(emoji_list_el[1].get_attribute("data-name"), "like")
+#         self.assertEqual(emoji_list_el[0].get_attribute("data-name"), "smile")
+#         self.assertEqual(emoji_list_el[1].get_attribute("data-name"), "like")

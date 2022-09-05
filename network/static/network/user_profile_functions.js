@@ -14,12 +14,12 @@ function imgModal() {
     img.onclick = function(){
         // Disable main scroll bar
         document.body.style.overflow = "hidden";
-        alert("show img");
+        console.log("show img",this.alt,this.src);
         // Show modal
         modal.style.display = "block";
 
         // Get img info
-        modalImg.src = this.src;
+        modalImg.src = this.src;//img == this
         captionText.innerHTML = this.alt;
     }
     

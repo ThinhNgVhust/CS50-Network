@@ -50,7 +50,7 @@ class Post(models.Model):
 
     # Model fields
     # auto: post-id
-    user = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name="posted by", related_name="posts")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name="posted by", related_name="posts")#find all posts buy user. ex: user.posts.all()
     content = models.TextField(blank=False)
     date = models.DateTimeField(auto_now_add=True, null=False, blank=True, verbose_name="posted on")
 
