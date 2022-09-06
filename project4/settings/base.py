@@ -107,7 +107,6 @@ FLATPICKR_SETTINGS = {
 
 LANGUAGES = [
     ('en', 'English'),
-    ('pl', 'Polish'),
     ('vi', 'Vietnamese'),
 ]
 

@@ -7,9 +7,9 @@ document.addEventListener('DOMContentLoaded', function() {
         showMoreButtonControl(postNode);
     })
 
-    window.onresize = () => {
-        document.querySelectorAll("div.post").forEach((postNode) => {
-            showMoreButtonControl(postNode);
-        })
-    }
+    // window.onresize = () => {
+    //     document.querySelectorAll("div.post").forEach((postNode) => {
+    //         showMoreButtonControl(postNode);
+    //     })
+    // }
 });

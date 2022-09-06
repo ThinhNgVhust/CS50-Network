@@ -1,3 +1,4 @@
+
 document.addEventListener('DOMContentLoaded', function() {
     // Init posts
     document.querySelectorAll("div.post").forEach((postNode) => {

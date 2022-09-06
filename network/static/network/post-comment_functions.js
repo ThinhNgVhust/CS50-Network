@@ -126,7 +126,7 @@ function likePanelAnimationControl(node) {
         timeoutIn = setTimeout(() => {
             emojiPanel.classList.remove("hidden");
             emojiPanel.classList.add("like-panel-in");
-        }, 400)
+        }, 200)
     })
 
     // On hover out hide like-panel after 1s

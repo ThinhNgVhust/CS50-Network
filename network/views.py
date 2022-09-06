@@ -16,13 +16,21 @@ from .models import User, Post, Comment, Like, Following, UserProfile
 from .forms import CreatePostForm, CreateCommentForm, CreateUserProfileForm
 
 #TODO: custom 404 page
-
+# POST -> Create 
+    # (201 ( Create )/404 not found/ 409 conflict if resource already exists )  
+# GET -> Read 
+    # (200 (OK))
+    #404 Not found
+# PUT -> Update/Replace
+    #405 Not allow
+# DELETE -> Delete 
+    #405 Not allow
+import django
 def index(request):
     """ View: Show all posts """
 
     # Get all posts
     all_posts = Post.objects.order_by("-date").all()
-
     # Create page controll
     paginator = Paginator(all_posts, 10)
     page_number = request.GET.get('page')
@@ -34,6 +42,7 @@ def index(request):
         "page_obj": page_obj,
         "add_post_available": True
     })
+
 
 @login_required(login_url="network:login")
 def post_comment(request, action):
@@ -120,6 +129,7 @@ def post_comment(request, action):
         object_to_delete.delete()
         return HttpResponse(status=204)
 
+
 @login_required(login_url="network:login")
 def user_profile(request, user_id):
     """ View: Shows requested user profile and the user's posts """
@@ -129,8 +139,9 @@ def user_profile(request, user_id):
 
     # Get following and followed user objects
     following_id_list = Following.objects.filter(user=user_id).values_list('user_followed', flat=True)
+    print("following_id_list: ",following_id_list)
     followers_id_list = Following.objects.filter(user_followed=user_id).values_list('user_id', flat=True)
-
+    print("following_id_list: ",followers_id_list)
     following_user_list = User.objects.filter(id__in=following_id_list)
     followers_user_list = User.objects.filter(id__in=followers_id_list)
 
@@ -146,6 +157,7 @@ def user_profile(request, user_id):
         "page_obj": page_obj,
         "comment_form": CreateCommentForm(auto_id=False)
     })
+
 
 @login_required(login_url="network:login")
 def edit_profile(request):
@@ -195,17 +207,20 @@ def edit_profile(request):
         "max_file_size": settings.MAX_UPLOAD_SIZE
     })
 
+
 @login_required(login_url="network:login")
 def like(request, action, action_id):
     """ View: Controls all actions regarding liking """
 
     if request.method == "GET":
-        # Check if like exists and send back info
+        # Check if like exists and send back info to every post
         try:
             if action == "post":
+                print("Call Like from  a post")
                 post = Post.objects.get(pk=action_id)
                 like_obj = Like.objects.get(user=request.user, post=post)
             elif action == "comment":
+                print("Call like from a comment")
                 comment = Comment.objects.get(pk=action_id)
                 like_obj = Like.objects.get(user=request.user, comment=comment)
             else:
@@ -226,10 +241,10 @@ def like(request, action, action_id):
                 "like": "True",
                 "emojiType": [emoji_tuple[1] for emoji_tuple in Like.LIKE_TYPE_CHOICES if emoji_tuple[0] == like_obj.emoji_type][0]
             }, status=200)
-        # Something went wrong
-        return JsonResponse({
-                "error": _(f"Unknown error during GET {action} like ")
-        }, status=400)
+        # # Something went wrong
+        # return JsonResponse({
+        #         "error": _(f"Unknown error during GET {action} like ")
+        # }, status=400)
 
     elif request.method == "POST":
         body = json.loads(request.body)
@@ -280,6 +295,7 @@ def like(request, action, action_id):
 
         return HttpResponse(status=201)
 
+
 @login_required(login_url="network:login")
 def following(request):
     """ View: Show users' posts that current user follows"""
@@ -304,6 +320,7 @@ def following(request):
         "add_post_available": False
     })
 
+
 @login_required(login_url="network:login")
 def follow_unfollow(request, user_id):
     """ View: Controls following/unfollowing users (only POST) """
@@ -326,6 +343,8 @@ def follow_unfollow(request, user_id):
             get_follow_obj.delete()
 
         return HttpResponseRedirect(reverse("network:user-profile", args=[user_id]))
+
+
 
 def login_view(request):
     """ View: Controls logging in """
@@ -358,6 +377,7 @@ def login_view(request):
             return HttpResponseRedirect(reverse("network:index"))
         else:
             return render(request, "network/login.html")
+
 
 
 def logout_view(request):
